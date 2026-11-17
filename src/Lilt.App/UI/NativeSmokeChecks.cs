@@ -49,6 +49,8 @@ public static class NativeSmokeChecks
             var transparentStyle = NativeMethods.GetExStyle(handle).ToInt64();
             Require((transparentStyle & NativeMethods.WsExTransparent) != 0, "Click-through did not set WS_EX_TRANSPARENT.");
             Require((transparentStyle & NativeMethods.WsExLayered) != 0, "Click-through did not set WS_EX_LAYERED.");
+            Require(NativeMethods.GetLayeredWindowAttributes(handle, out _, out var alpha, out var flags) && alpha == 255 && (flags & 2) != 0,
+                "The native click-through surface was not initialized.");
             behavior.SetClickThrough(false);
             Require((NativeMethods.GetExStyle(handle).ToInt64() & NativeMethods.WsExTransparent) == 0,
                 "Click-through could not be disabled.");
@@ -131,6 +133,14 @@ public static class NativeSmokeChecks
                 }
 
                 SaveVisual(content, Path.Combine(output, test.Name + ".png"));
+                await Task.Delay(100);
+                CaptureScreen(window, Path.Combine(output, test.Name + "-screen.png"), report);
+                behavior.SetClickThrough(true);
+                await Task.Delay(100);
+                Require((NativeMethods.GetExStyle(handle).ToInt64() & NativeMethods.WsExLayered) != 0,
+                    $"{test.Name}: the layered style was lost after rendering.");
+                CaptureScreen(window, Path.Combine(output, test.Name + "-click-through.png"), report);
+                behavior.SetClickThrough(false);
                 report.Add(string.Create(CultureInfo.InvariantCulture,
                     $"{test.Name}: {window.ActualWidth:0.##} × {window.ActualHeight:0.##} DIP; content {content.ActualWidth:0.##} × {content.ActualHeight:0.##}; four visible controls; passed"));
             }
@@ -201,6 +211,24 @@ public static class NativeSmokeChecks
             pixels[offset + 3] = 255;
         }
         return EncodePng(BitmapSource.Create(size, size, 96, 96, PixelFormats.Bgra32, null, pixels, size * 4));
+    }
+
+    private static void CaptureScreen(MainWindow window, string file, List<string> report)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        if (!NativeMethods.GetWindowRect(handle, out var rect)) return;
+        try
+        {
+            using var bitmap = new System.Drawing.Bitmap(Math.Max(1, rect.Right - rect.Left), Math.Max(1, rect.Bottom - rect.Top));
+            using var graphics = System.Drawing.Graphics.FromImage(bitmap);
+            graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, bitmap.Size,
+                System.Drawing.CopyPixelOperation.SourceCopy | System.Drawing.CopyPixelOperation.CaptureBlt);
+            bitmap.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            report.Add("Desktop capture was unavailable in this Windows session.");
+        }
     }
 
     private static byte[] EncodePng(BitmapSource image)

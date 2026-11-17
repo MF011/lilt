@@ -148,6 +148,18 @@ public sealed class WindowBehavior : IDisposable
 
     private IntPtr WindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (message == NativeMethods.WmStyleChanging && wParam.ToInt32() == NativeMethods.GwlExStyle &&
+            _ignoreClicks && lParam != IntPtr.Zero)
+        {
+            // HwndTarget strips WS_EX_LAYERED on non-per-pixel WPF windows. In this mode
+            // Windows owns the constant-alpha layer so its hit testing can pass through
+            // to windows in other processes. Leave normal WPF style handling unchanged.
+            var style = Marshal.PtrToStructure<NativeMethods.StyleStruct>(lParam);
+            style.NewStyle |= (uint)(NativeMethods.WsExLayered | NativeMethods.WsExTransparent);
+            Marshal.StructureToPtr(style, lParam, false);
+            handled = true;
+            return IntPtr.Zero;
+        }
         if (message == NativeMethods.WmMouseActivate)
         {
             handled = true;
@@ -205,7 +217,8 @@ public sealed class WindowBehavior : IDisposable
         {
             State = enabled ? 4 : 0,
             Flags = enabled ? 2 : 0,
-            GradientColor = ((uint)Math.Round(_opacity * 255) << 24) | 0x0018110E
+            // The WPF surface supplies the main tint; keep the native blur from doubling it.
+            GradientColor = ((uint)Math.Round(_opacity * .25 * 255) << 24) | 0x0018110E
         };
         var pointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMethods.AccentPolicy>());
         try

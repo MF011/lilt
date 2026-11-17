@@ -33,6 +33,9 @@ jobs:
           }
           $process.Refresh()
           if ($process.ExitCode -ne 0) {
+            Get-ChildItem 'artifacts/smoke/*.txt' -ErrorAction SilentlyContinue | ForEach-Object {
+              Get-Content $_.FullName
+            }
             throw "Startup check failed with exit code $($process.ExitCode)."
           }
       - name: Save native previews

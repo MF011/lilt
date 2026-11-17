@@ -16,6 +16,7 @@ internal static class NativeMethods
     internal const uint SwpNoActivate = 0x10;
     internal const uint SwpFrameChanged = 0x20;
     internal const int WmMouseActivate = 0x21;
+    internal const int WmStyleChanging = 0x7C;
     internal const int WmNcHitTest = 0x84;
     internal const int WmNcLButtonDown = 0xA1;
     internal const int WmHotkey = 0x312;
@@ -40,6 +41,9 @@ internal static class NativeMethods
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct Rect { internal int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct StyleStruct { internal uint OldStyle, NewStyle; }
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct Margins { internal int Left, Right, Top, Bottom; }
@@ -99,6 +103,9 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint colorKey, byte alpha, uint flags);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetLayeredWindowAttributes(IntPtr hwnd, out uint colorKey, out byte alpha, out uint flags);
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionAttributeData data);
