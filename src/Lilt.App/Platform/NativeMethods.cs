@@ -17,6 +17,7 @@ internal static class NativeMethods
     internal const uint SwpFrameChanged = 0x20;
     internal const int WmMouseActivate = 0x21;
     internal const int WmStyleChanging = 0x7C;
+    internal const int WmNcCalcSize = 0x83;
     internal const int WmNcHitTest = 0x84;
     internal const int WmNcLButtonDown = 0xA1;
     internal const int WmHotkey = 0x312;

@@ -84,7 +84,7 @@ public static class NativeSmokeChecks
 
             foreach (var test in new[]
             {
-                (Name: "compact", Width: 320d, Height: 96d, Size: WidgetSize.Compact),
+                (Name: "compact", Width: 288d, Height: 88d, Size: WidgetSize.Compact),
                 (Name: "comfortable", Width: 400d, Height: 136d, Size: WidgetSize.Comfortable),
                 (Name: "expanded", Width: 440d, Height: 220d, Size: WidgetSize.Expanded)
             })
@@ -99,11 +99,35 @@ public static class NativeSmokeChecks
                 Require(window.Content is FrameworkElement, "The widget has no WPF content root.");
                 var content = (FrameworkElement)window.Content;
                 Require(content.ActualWidth > 0 && content.ActualHeight > 0, $"{test.Name}: content has no size.");
+                Require(Math.Abs(content.ActualWidth - window.ActualWidth) < 1 && Math.Abs(content.ActualHeight - window.ActualHeight) < 1,
+                    $"{test.Name}: a native frame is taking space away from the card.");
                 var elements = Descendants(content).OfType<FrameworkElement>().Where(element => element.IsVisible).ToArray();
                 var buttons = elements.OfType<Button>().ToArray();
-                Require(buttons.Length == 4, $"{test.Name}: all four playback/like buttons must remain visible.");
+                Require(buttons.Length == 4, $"{test.Name}: three transport buttons and the cover Like button must exist.");
                 Require(buttons.All(button => button.IsEnabled), $"{test.Name}: a fixture capability was not reflected by its button.");
                 foreach (var button in buttons) RequireInside(content, button, test.Name);
+
+                var coverHost = window.FindName("AlbumCover") as FrameworkElement;
+                var likeOverlay = window.FindName("LikeOverlay") as Button;
+                Require(coverHost is not null && likeOverlay is not null, $"{test.Name}: the cover Like overlay is missing.");
+                RequireInside(coverHost!, likeOverlay!, test.Name);
+                Require(likeOverlay!.Focusable && System.Windows.Automation.AutomationProperties.GetName(likeOverlay) == vm.SaveLabel,
+                    $"{test.Name}: the cover Like button must remain accessible.");
+                // Moving the window can leave the pointer over it. A pointer outside the
+                // cover is the state in which the artwork must remain unobscured.
+                await Task.Delay(200);
+                if (!coverHost!.IsMouseOver && !likeOverlay.IsKeyboardFocusWithin)
+                {
+                    Require(likeOverlay.Opacity <= .01 && !likeOverlay.IsHitTestVisible,
+                        $"{test.Name}: the inactive cover Like overlay must be hidden and pass pointer hits to the cover.");
+                    Require(buttons.Count(button => button.Opacity > .01) == 3,
+                        $"{test.Name}: only three transport buttons should be shown outside the cover.");
+                }
+                else
+                {
+                    Require(likeOverlay.Opacity >= .99 && likeOverlay.IsHitTestVisible,
+                        $"{test.Name}: hovering or focusing the cover must reveal its Like button.");
+                }
 
                 var title = elements.OfType<TextBlock>().SingleOrDefault(text => text.Text == sample.Title);
                 var artist = elements.OfType<TextBlock>().SingleOrDefault(text => text.Text == sample.Artist);
@@ -142,7 +166,7 @@ public static class NativeSmokeChecks
                 CaptureScreen(window, Path.Combine(output, test.Name + "-click-through.png"), report);
                 behavior.SetClickThrough(false);
                 report.Add(string.Create(CultureInfo.InvariantCulture,
-                    $"{test.Name}: {window.ActualWidth:0.##} × {window.ActualHeight:0.##} DIP; content {content.ActualWidth:0.##} × {content.ActualHeight:0.##}; four visible controls; passed"));
+                    $"{test.Name}: {window.ActualWidth:0.##} × {window.ActualHeight:0.##} DIP; content {content.ActualWidth:0.##} × {content.ActualHeight:0.##}; three transport controls and cover Like; passed"));
             }
             File.WriteAllLines(Path.Combine(output, "layout.txt"), report);
         }

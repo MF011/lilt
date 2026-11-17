@@ -25,6 +25,7 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
     private double _positionSeconds;
     private double _volumePercent = 50;
     private double _glassOpacity = .72;
+    private bool _opaqueBackground;
     private readonly DelegateCommand _playPause;
     private readonly DelegateCommand _previous;
     private readonly DelegateCommand _next;
@@ -132,8 +133,14 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
 
     public double GlassOpacity
     {
-        get => _glassOpacity;
+        get => OpaqueBackground ? 1 : _glassOpacity;
         set => Set(ref _glassOpacity, Math.Clamp(value, .18, .95));
+    }
+
+    public bool OpaqueBackground
+    {
+        get => _opaqueBackground;
+        set { if (Set(ref _opaqueBackground, value)) Changed(nameof(GlassOpacity)); }
     }
 
     public bool IsSeeking

@@ -18,7 +18,7 @@ Download `Lilt-win-x64.zip` from [Releases](https://github.com/MF011/lilt/releas
 
 Start Spotify and play something. Right-click Lilt's tray icon for settings. Drag an empty part of the card to move it; drag its edges to resize it.
 
-The smallest layout keeps the cover, title, artists, like and previous/play/next buttons. More space reveals the album, then the timeline and available volume controls.
+The smallest layout is 288 × 88. It keeps the cover, title, artists and previous/play/next buttons. Hover the cover to like a track. More space reveals the album, then the timeline and available volume controls.
 
 | Shortcut | Action |
 | --- | --- |

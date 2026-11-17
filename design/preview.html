@@ -23,7 +23,7 @@
     .example.expanded { left:514px; top:475px; }
     .caption { display:flex; align-items:center; gap:12px; margin:0 0 14px 3px; color:#e1eee4a6; font-size:11px; letter-spacing:.1px; }
     .caption .dimensions { color:#b4c8bd65; font-size:10px; }
-    .player { position:relative; resize:both; overflow:hidden; min-width:320px; min-height:96px; width:400px; height:132px; padding:12px 16px; border:1px solid #ffffff2a; border-bottom-color:#ffffff12; border-radius:22px; background:linear-gradient(130deg,#1b2026dc,#0c1016ba); box-shadow:0 25px 60px #02070745,0 5px 16px #02070725,inset 0 1px 0 #ffffff16; backdrop-filter:blur(32px) saturate(125%); user-select:none; }
+    .player { position:relative; resize:both; overflow:hidden; min-width:288px; min-height:88px; width:400px; height:132px; padding:12px 16px; border:1px solid #ffffff2a; border-bottom-color:#ffffff12; border-radius:22px; background:linear-gradient(130deg,#1b2026dc,#0c1016ba); box-shadow:0 25px 60px #02070745,0 5px 16px #02070725,inset 0 1px 0 #ffffff16; backdrop-filter:blur(32px) saturate(125%); user-select:none; }
     .player::before { content:""; position:absolute; inset:0; pointer-events:none; background:radial-gradient(ellipse at 12% 8%,#b7f5db11,transparent 62%); }
     .player::after { content:""; position:absolute; pointer-events:none; top:0; left:30px; width:110px; height:1px; background:linear-gradient(90deg,transparent,#ffffff40,transparent); }
     .player:focus-within { outline:1px solid #c9f8e460; outline-offset:3px; }
@@ -47,9 +47,11 @@
     .play { width:34px; height:34px; border-radius:50%; background:#c9f8e4; color:#162b24; margin:0 2px; box-shadow:0 2px 8px #00000015; }
     .play:hover { background:#d9ffed; }
     .play svg { width:16px; height:16px; }
-    .like { width:28px; margin-left:3px; color:#b8c1c4; }
-    .like svg { width:17px; height:17px; }
-    .like[aria-pressed="true"] { color:#c9f8e4; }
+    .like { position:absolute; inset:0; width:100%; height:100%; margin:0; border-radius:inherit; color:#c9f8e4; background:#08101366; opacity:0; pointer-events:none; transition:opacity .15s,background .15s; }
+    .cover:hover .like,.cover:focus-within .like { opacity:1; pointer-events:auto; }
+    .like:hover { background:#0810137a; }
+    .like:active { transform:none; }
+    .like svg { width:18px; height:18px; }
     .like[aria-pressed="true"] svg { fill:currentColor; }
     .detail { display:none; }
     .rail { width:100%; height:3px; background:#ffffff12; border-radius:3px; cursor:pointer; }
@@ -61,9 +63,10 @@
     .volume svg { width:13px; height:13px; color:#7e9294; }
     .volume .rail { width:65px; height:2px; }
     .volume .filled { width:62%; background:#aebfbb90; }
-    .player[data-layout="compact"] .cover { width:56px; height:56px; }
+    .player[data-layout="compact"] { padding:10px 12px; }
+    .player[data-layout="compact"] .cover { width:44px; height:44px; }
     .player[data-layout="compact"] .album { display:none; }
-    .player[data-layout="compact"] .main { gap:10px; }
+    .player[data-layout="compact"] .main { gap:10px; min-height:64px; }
     .player[data-layout="expanded"] { padding:18px 20px 16px; }
     .player[data-layout="expanded"] .main { height:100px; }
     .player[data-layout="expanded"] .cover { width:80px; height:80px; border-radius:11px; }
@@ -88,7 +91,7 @@
   <div class="wallpaper"></div><div class="texture"></div>
   <header><div class="mark"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 3v10h8" stroke="#c9f8e4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 3v6h4" stroke="#c9f8e4" stroke-opacity=".45" stroke-width="1.5" stroke-linecap="round"/></svg></div><strong>Lilt</strong><span>Design preview</span></header>
   <main class="scene">
-    <section class="example compact"><div class="caption">Compact<span class="dimensions">320 × 96</span></div><article class="player" style="width:320px;height:96px" aria-label="Compact player"></article></section>
+    <section class="example compact"><div class="caption">Compact<span class="dimensions">288 × 88</span></div><article class="player" style="width:288px;height:88px" aria-label="Compact player"></article></section>
     <section class="example comfortable"><div class="caption">Comfortable<span class="dimensions">400 × 132</span></div><article class="player" style="width:400px;height:132px" aria-label="Comfortable player"></article></section>
     <section class="example expanded"><div class="caption">A little more room<span class="dimensions">440 × 220</span></div><article class="player" style="width:440px;height:220px" aria-label="Expanded player"></article></section>
   </main>
@@ -104,7 +107,7 @@
       volume:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h3l4-4v14l-4-4H3Z"/><path d="M13 6c2 2 2 6 0 8m3-11c4 4 4 10 0 14"/></svg>'
     };
     document.querySelectorAll('.player').forEach((player,index)=>{
-      player.innerHTML=`<div class="main"><div class="cover"><img src="../docs/artwork.svg" alt="Abstract mint-colored album artwork"><span class="playing-dot" title="Playing"></span></div><div class="metadata"><div class="title" title="Tides">Tides</div><div class="artist" title="Mira Vale">Mira Vale</div><div class="album" title="After the quiet">After the quiet</div></div><div class="actions"><button aria-label="Previous track" title="Previous">${icons.previous}</button><button class="play" aria-label="Pause" title="Pause">${icons.pause}</button><button aria-label="Next track" title="Next">${icons.next}</button><button class="like" aria-label="Save track" title="Save track" aria-pressed="${index===2}">${icons.heart}</button></div></div><div class="detail"><div class="rail" aria-label="Playback progress"><span class="filled"></span></div><div class="bottom"><span class="time">1:24</span><span class="duration">/ 3:48</span><div class="volume">${icons.volume}<div class="rail"><span class="filled"></span></div></div></div></div>`;
+      player.innerHTML=`<div class="main"><div class="cover"><img src="../docs/artwork.svg" alt="Abstract mint-colored album artwork"><button class="like" aria-label="${index===2?'Remove saved track':'Save track'}" title="${index===2?'Remove saved track':'Save track'}" aria-pressed="${index===2}">${icons.heart}</button><span class="playing-dot" title="Playing"></span></div><div class="metadata"><div class="title" title="Tides">Tides</div><div class="artist" title="Mira Vale">Mira Vale</div><div class="album" title="After the quiet">After the quiet</div></div><div class="actions"><button aria-label="Previous track" title="Previous">${icons.previous}</button><button class="play" aria-label="Pause" title="Pause">${icons.pause}</button><button aria-label="Next track" title="Next">${icons.next}</button></div></div><div class="detail"><div class="rail" aria-label="Playback progress"><span class="filled"></span></div><div class="bottom"><span class="time">1:24</span><span class="duration">/ 3:48</span><div class="volume">${icons.volume}<div class="rail"><span class="filled"></span></div></div></div></div>`;
       const update=()=>{const {width,height}=player.getBoundingClientRect();player.dataset.layout=width>=400&&height>=190?'expanded':width>=380&&height>=126?'comfortable':'compact';};
       new ResizeObserver(update).observe(player);update();
       const play=player.querySelector('.play');

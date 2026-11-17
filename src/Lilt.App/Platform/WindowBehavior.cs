@@ -25,6 +25,7 @@ public sealed class WindowBehavior : IDisposable
 
     public event Action? ToggleVisibilityRequested;
     public event Action? ToggleClickThroughRequested;
+    public event Action<bool>? BackdropChanged;
     public bool VisibilityHotkeyRegistered { get; private set; }
     public bool ClickThroughHotkeyRegistered { get; private set; }
     public bool BackdropApplied { get; private set; }
@@ -148,6 +149,13 @@ public sealed class WindowBehavior : IDisposable
 
     private IntPtr WindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (message == NativeMethods.WmNcCalcSize)
+        {
+            // Keep the entire HWND as client area. WindowStyle=None otherwise leaves
+            // a standard resize border; WM_NCHITTEST below supplies our resize edges.
+            handled = true;
+            return IntPtr.Zero;
+        }
         if (message == NativeMethods.WmStyleChanging && wParam.ToInt32() == NativeMethods.GwlExStyle &&
             _ignoreClicks && lParam != IntPtr.Zero)
         {
@@ -212,7 +220,7 @@ public sealed class WindowBehavior : IDisposable
     private bool ApplyBackdrop()
     {
         if (_handle == IntPtr.Zero) return false;
-        var enabled = _backdrop && !_moving && !SystemParameters.HighContrast;
+        var enabled = _backdrop && !_moving && CanUseBackdrop();
         var accent = new NativeMethods.AccentPolicy
         {
             State = enabled ? 4 : 0,
@@ -235,7 +243,22 @@ public sealed class WindowBehavior : IDisposable
         catch (EntryPointNotFoundException) { BackdropApplied = false; }
         catch (DllNotFoundException) { BackdropApplied = false; }
         finally { Marshal.FreeHGlobal(pointer); }
+        BackdropChanged?.Invoke(BackdropApplied);
         return BackdropApplied;
+    }
+
+    private static bool CanUseBackdrop()
+    {
+        if (SystemParameters.HighContrast || SystemParameters.IsRemoteSession) return false;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            return key?.GetValue("EnableTransparency") is not int enabled || enabled != 0;
+        }
+        catch (Exception exception) when (exception is System.Security.SecurityException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private void UpdateRegion()

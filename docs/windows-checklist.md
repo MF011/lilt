@@ -42,7 +42,7 @@ Record the Windows build, display scaling, graphics adapter, Spotify version and
 - [ ] Check pause, buffering/no active playback, advertisements and local files where available.
 - [ ] If testing Free, record which transport actions Spotify permits.
 - [ ] In account mode, confirm the displayed track and device agree with Spotify.
-- [ ] Like and unlike a track. Verify both changes in Spotify.
+- [ ] Hover the cover to reveal the heart. Like and unlike a track, and verify both changes in Spotify.
 - [ ] Switch tracks quickly and use like. Confirm a late response does not change the next track's heart.
 - [ ] Transfer playback to a phone. Confirm the displayed state and command target stay consistent.
 - [ ] Confirm seek and volume appear only when the layout and device allow them.

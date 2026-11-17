@@ -78,7 +78,14 @@ public partial class App : Application
                 _widget.Left = left;
                 _widget.Top = top;
             }
+            else
+            {
+                _widget.WindowStartupLocation = WindowStartupLocation.Manual;
+                _widget.Left = Math.Max(SystemParameters.WorkArea.Left, SystemParameters.WorkArea.Right - _widget.Width - 24);
+                _widget.Top = Math.Max(SystemParameters.WorkArea.Top, SystemParameters.WorkArea.Bottom - _widget.Height - 24);
+            }
             _windowBehavior = new WindowBehavior(_widget);
+            _windowBehavior.BackdropChanged += available => _viewModel.OpaqueBackground = !available;
             _windowBehavior.UpdateCornerRadius(22);
             _windowBehavior.SetTopmost(_settings.Topmost);
             _windowBehavior.SetOpacity(_settings.GlassOpacity);
@@ -100,6 +107,7 @@ public partial class App : Application
             _viewModel.SeekRequested += position => _ = SeekAsync(position);
             _viewModel.VolumeRequested += percent => _ = SetVolumeAsync(percent);
             _widget.Show();
+            _viewModel.OpaqueBackground = !_windowBehavior.BackdropApplied;
             _windowBehavior.RestoreToVisibleScreen();
             UpdateTray();
             _positionTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
@@ -413,7 +421,8 @@ public partial class App : Application
 
     private void ResetPosition()
     {
-        _widget.Width = 400; _widget.Height = 136;
+        var defaults = new WidgetSettings();
+        _widget.Width = defaults.Width; _widget.Height = defaults.Height;
         _widget.Left = SystemParameters.WorkArea.Right - _widget.Width - 24;
         _widget.Top = SystemParameters.WorkArea.Bottom - _widget.Height - 24;
         _widget.Show(); _windowBehavior.RestoreToVisibleScreen(); SaveSettings(); UpdateTray();

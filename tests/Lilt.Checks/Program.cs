@@ -9,9 +9,9 @@ void Equal<T>(T expected, T actual)
         throw new InvalidOperationException($"Expected {expected}, got {actual}.");
 }
 
-Check("Compact keeps small windows usable", () => Equal(WidgetSize.Compact, WidgetLayout.ForSize(320, 96)));
-Check("Width alone never adds controls that do not fit", () => Equal(WidgetSize.Compact, WidgetLayout.ForSize(900, 96)));
-Check("Height alone never adds controls that do not fit", () => Equal(WidgetSize.Compact, WidgetLayout.ForSize(320, 500)));
+Check("Compact keeps small windows usable", () => Equal(WidgetSize.Compact, WidgetLayout.ForSize(288, 88)));
+Check("Width alone never adds controls that do not fit", () => Equal(WidgetSize.Compact, WidgetLayout.ForSize(900, 88)));
+Check("Height alone never adds controls that do not fit", () => Equal(WidgetSize.Compact, WidgetLayout.ForSize(288, 500)));
 Check("Comfortable layout appears when both axes fit", () => Equal(WidgetSize.Comfortable, WidgetLayout.ForSize(380, 126)));
 Check("Expanded controls require sufficient height", () => Equal(WidgetSize.Comfortable, WidgetLayout.ForSize(400, 189)));
 Check("Expanded controls fit at the boundary", () => Equal(WidgetSize.Expanded, WidgetLayout.ForSize(400, 190)));
@@ -29,12 +29,12 @@ Check("Unknown duration has no unbounded progress", () => Equal(TimeSpan.Zero, (
 Check("Window dimensions are bounded after loading", () =>
 {
     var value = new WidgetSettings { Width = -40, Height = 90000 }.Validated();
-    Equal(320d, value.Width); Equal(1000d, value.Height);
+    Equal(288d, value.Width); Equal(1000d, value.Height);
 });
 Check("Nonfinite settings recover to usable values", () =>
 {
     var value = new WidgetSettings { Width = double.NaN, Height = double.PositiveInfinity, Left = double.NegativeInfinity, Top = double.NaN, GlassOpacity = double.NaN }.Validated();
-    Equal(400d, value.Width); Equal(136d, value.Height); Equal<double?>(null, value.Left); Equal<double?>(null, value.Top); Equal(.72, value.GlassOpacity);
+    Equal(320d, value.Width); Equal(96d, value.Height); Equal<double?>(null, value.Left); Equal<double?>(null, value.Top); Equal(.72, value.GlassOpacity);
 });
 Check("Negative monitor coordinates are preserved", () => Equal<double?>(-1920, new WidgetSettings { Left = -1920 }.Validated().Left));
 Check("Extreme saved coordinates remain valid for Windows", () => Equal<double?>(100000, new WidgetSettings { Left = double.MaxValue }.Validated().Left));
