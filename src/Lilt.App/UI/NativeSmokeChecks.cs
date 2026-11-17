@@ -221,8 +221,22 @@ public static class NativeSmokeChecks
         {
             using var bitmap = new System.Drawing.Bitmap(Math.Max(1, rect.Right - rect.Left), Math.Max(1, rect.Bottom - rect.Top));
             using var graphics = System.Drawing.Graphics.FromImage(bitmap);
-            graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, bitmap.Size,
-                System.Drawing.CopyPixelOperation.SourceCopy | System.Drawing.CopyPixelOperation.CaptureBlt);
+            var screen = NativeMethods.GetDC(IntPtr.Zero);
+            if (screen == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
+            var target = IntPtr.Zero;
+            try
+            {
+                target = graphics.GetHdc();
+                // SRCCOPY | CAPTUREBLT includes layered windows. Graphics.CopyFromScreen
+                // rejects this valid Win32 flag combination on current .NET.
+                if (!NativeMethods.BitBlt(target, 0, 0, bitmap.Width, bitmap.Height, screen, rect.Left, rect.Top, 0x40CC0020))
+                    throw new System.ComponentModel.Win32Exception();
+            }
+            finally
+            {
+                if (target != IntPtr.Zero) graphics.ReleaseHdc(target);
+                NativeMethods.ReleaseDC(IntPtr.Zero, screen);
+            }
             bitmap.Save(file, System.Drawing.Imaging.ImageFormat.Png);
         }
         catch (System.ComponentModel.Win32Exception)
