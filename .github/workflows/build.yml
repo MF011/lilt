@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build and package
+        shell: pwsh
+        run: ./scripts/build.ps1
+      - name: Check native startup
+        shell: pwsh
+        run: |
+          $app = Join-Path $PWD 'artifacts/Lilt-win-x64/Lilt.exe'
+          $process = Start-Process -FilePath $app -ArgumentList '--smoke-test' -PassThru
+          if (-not $process.WaitForExit(20000)) {
+            Stop-Process -Id $process.Id -Force
+            throw 'Startup check timed out.'
+          }
+          $process.Refresh()
+          if ($process.ExitCode -ne 0) {
+            throw "Startup check failed with exit code $($process.ExitCode)."
+          }
+      - name: Save native previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lilt-native-preview
+          path: artifacts/smoke/
+          if-no-files-found: warn
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lilt-win-x64
+          path: artifacts/Lilt-win-x64.zip
+          if-no-files-found: error
+          retention-days: 14

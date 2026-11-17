@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+
+  release:
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Lilt-win-x64
+          path: artifacts
+      - name: Publish package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          LILT_TAG: ${{ github.ref_name }}
+        run: |
+          $releaseArgs = @(
+            'release', 'create', $env:LILT_TAG,
+            'artifacts/Lilt-win-x64.zip',
+            '--title', "Lilt $env:LILT_TAG",
+            '--generate-notes', '--verify-tag'
+          )
+          if ($env:LILT_TAG.Contains('-')) { $releaseArgs += '--prerelease' }
+          gh @releaseArgs
+          if ($LASTEXITCODE -ne 0) { throw 'Release failed.' }

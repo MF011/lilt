@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>Lilt</AssemblyName>
+    <RootNamespace>Lilt.App</RootNamespace>
+    <Version>0.1.0</Version>
+    <Authors>Lilt contributors</Authors>
+    <Description>A small Spotify widget for Windows.</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Resources/lilt.ico</ApplicationIcon>
+    <!-- WPF owns DPI setup; WinForms is used only for the tray menu. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Lilt.Core/Lilt.Core.csproj" />
+    <ProjectReference Include="../Lilt.Spotify/Lilt.Spotify.csproj" />
+  </ItemGroup>
+</Project>

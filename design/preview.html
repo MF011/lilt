@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lilt — design preview</title>
+  <style>
+    :root { color-scheme: dark; font-family: "Segoe UI", Inter, Arial, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 360px; min-height: 100vh; overflow: hidden; background: #11191e; color: #f5f8f7; }
+    .wallpaper { position: fixed; inset: 0; overflow: hidden; background: radial-gradient(ellipse at 14% 18%,#304e4d 0,transparent 47%),radial-gradient(ellipse at 90% 85%,#314248 0,transparent 46%),linear-gradient(145deg,#19282b,#11191e 65%); }
+    .wallpaper::before { content:""; position:absolute; width:1150px; height:1150px; top:-540px; right:-260px; border-radius:48%; background:linear-gradient(145deg,#769d8d90,#a8c9ab42 38%,#29484920 70%); box-shadow:inset 0 1px 1px #ffffff50,0 12px 80px #00000025; transform:rotate(32deg); }
+    .wallpaper::after { content:""; position:absolute; width:1100px; height:700px; bottom:-470px; left:-110px; border-radius:50%; background:linear-gradient(135deg,#537f7720,#66888380); box-shadow:inset 0 1px 1px #c4ffe440; transform:rotate(-12deg); }
+    .texture { position:fixed; inset:0; opacity:.035; pointer-events:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath filter='url(%23n)' opacity='.65' d='M0 0h160v160H0z'/%3E%3C/svg%3E"); }
+    header { position:fixed; top:48px; left:64px; display:flex; align-items:center; gap:12px; color:#e6f4ec; }
+    .mark { width:24px; height:24px; display:grid; place-items:center; border:1px solid #ffffff30; border-radius:8px; background:#ffffff08; }
+    header strong { font-size:17px; font-weight:500; letter-spacing:-.4px; }
+    header span { margin-left:14px; font-size:10px; letter-spacing:1.6px; color:#c1d0c080; text-transform:uppercase; }
+    .scene { position:relative; width:1440px; height:900px; margin:0 auto; }
+    .example { position:absolute; width:max-content; }
+    .example.compact { left:176px; top:264px; }
+    .example.comfortable { left:746px; top:220px; }
+    .example.expanded { left:514px; top:475px; }
+    .caption { display:flex; align-items:center; gap:12px; margin:0 0 14px 3px; color:#e1eee4a6; font-size:11px; letter-spacing:.1px; }
+    .caption .dimensions { color:#b4c8bd65; font-size:10px; }
+    .player { position:relative; resize:both; overflow:hidden; min-width:320px; min-height:96px; width:400px; height:132px; padding:12px 16px; border:1px solid #ffffff2a; border-bottom-color:#ffffff12; border-radius:22px; background:linear-gradient(130deg,#1b2026dc,#0c1016ba); box-shadow:0 25px 60px #02070745,0 5px 16px #02070725,inset 0 1px 0 #ffffff16; backdrop-filter:blur(32px) saturate(125%); user-select:none; }
+    .player::before { content:""; position:absolute; inset:0; pointer-events:none; background:radial-gradient(ellipse at 12% 8%,#b7f5db11,transparent 62%); }
+    .player::after { content:""; position:absolute; pointer-events:none; top:0; left:30px; width:110px; height:1px; background:linear-gradient(90deg,transparent,#ffffff40,transparent); }
+    .player:focus-within { outline:1px solid #c9f8e460; outline-offset:3px; }
+    .main { display:flex; align-items:center; gap:12px; height:100%; min-height:70px; cursor:grab; }
+    .main:active { cursor:grabbing; }
+    .cover { position:relative; flex:none; width:68px; height:68px; border-radius:9px; }
+    .cover img { display:block; width:100%; height:100%; border-radius:inherit; box-shadow:0 5px 12px #00000028; }
+    .playing-dot { position:absolute; right:-2px; bottom:-2px; width:9px; height:9px; border-radius:50%; background:#c9f8e4; border:2px solid #182324; box-shadow:0 0 8px #c9f8e430; }
+    .player.paused .playing-dot { background:#8d9895; box-shadow:none; }
+    .metadata { flex:1; min-width:0; padding-bottom:2px; }
+    .title { font-weight:600; font-size:14px; line-height:21px; color:#f5f8f7; letter-spacing:-.2px; }
+    .artist { font-size:11px; line-height:18px; color:#b8c1c4; }
+    .album { font-size:11px; line-height:17px; color:#77888b; margin-top:4px; }
+    .title,.artist,.album { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .actions { display:flex; align-items:center; gap:3px; flex:none; }
+    button { appearance:none; background:none; border:0; display:grid; place-items:center; color:#e6eaea; padding:0; width:26px; height:32px; border-radius:8px; cursor:pointer; transition:background .15s,transform .15s,color .15s; }
+    button:hover { background:#ffffff10; }
+    button:active { transform:scale(.91); }
+    button:focus-visible { outline:1px solid #c9f8e4; outline-offset:2px; }
+    button svg { width:15px; height:15px; }
+    .play { width:34px; height:34px; border-radius:50%; background:#c9f8e4; color:#162b24; margin:0 2px; box-shadow:0 2px 8px #00000015; }
+    .play:hover { background:#d9ffed; }
+    .play svg { width:16px; height:16px; }
+    .like { width:28px; margin-left:3px; color:#b8c1c4; }
+    .like svg { width:17px; height:17px; }
+    .like[aria-pressed="true"] { color:#c9f8e4; }
+    .like[aria-pressed="true"] svg { fill:currentColor; }
+    .detail { display:none; }
+    .rail { width:100%; height:3px; background:#ffffff12; border-radius:3px; cursor:pointer; }
+    .rail .filled { display:block; width:37%; height:100%; border-radius:3px; background:#c9f8e4b3; }
+    .bottom { display:flex; align-items:center; margin-top:10px; color:#819194; font-size:10px; }
+    .time { font-variant-numeric:tabular-nums; }
+    .duration { margin-left:8px; color:#56686d; }
+    .volume { margin-left:auto; display:flex; align-items:center; gap:8px; }
+    .volume svg { width:13px; height:13px; color:#7e9294; }
+    .volume .rail { width:65px; height:2px; }
+    .volume .filled { width:62%; background:#aebfbb90; }
+    .player[data-layout="compact"] .cover { width:56px; height:56px; }
+    .player[data-layout="compact"] .album { display:none; }
+    .player[data-layout="compact"] .main { gap:10px; }
+    .player[data-layout="expanded"] { padding:18px 20px 16px; }
+    .player[data-layout="expanded"] .main { height:100px; }
+    .player[data-layout="expanded"] .cover { width:80px; height:80px; border-radius:11px; }
+    .player[data-layout="expanded"] .title { font-size:18px; line-height:26px; }
+    .player[data-layout="expanded"] .artist { font-size:12px; line-height:20px; }
+    .player[data-layout="expanded"] .detail { display:block; margin-top:15px; }
+    .footer { position:fixed; left:64px; bottom:40px; font-size:10px; color:#afc6b866; letter-spacing:.1px; }
+    .footer b { color:#c7d8cd90; font-weight:400; }
+    .hint { position:fixed; right:64px; bottom:40px; color:#afc6b866; font-size:10px; }
+    @media(max-width:1100px) {
+      body { overflow:auto; }
+      header { position:relative; top:auto; left:auto; margin:32px; }
+      .scene { width:100%; height:auto; min-height:calc(100vh - 180px); display:flex; flex-direction:column; align-items:center; gap:42px; padding:30px 20px 100px; }
+      .example.compact,.example.comfortable,.example.expanded { position:relative; left:auto; top:auto; }
+      .footer { left:24px; bottom:18px; }
+      .hint { display:none; }
+    }
+    @media(prefers-reduced-motion:reduce) { * { transition:none !important; } }
+  </style>
+</head>
+<body>
+  <div class="wallpaper"></div><div class="texture"></div>
+  <header><div class="mark"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 3v10h8" stroke="#c9f8e4" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 3v6h4" stroke="#c9f8e4" stroke-opacity=".45" stroke-width="1.5" stroke-linecap="round"/></svg></div><strong>Lilt</strong><span>Design preview</span></header>
+  <main class="scene">
+    <section class="example compact"><div class="caption">Compact<span class="dimensions">320 × 96</span></div><article class="player" style="width:320px;height:96px" aria-label="Compact player"></article></section>
+    <section class="example comfortable"><div class="caption">Comfortable<span class="dimensions">400 × 132</span></div><article class="player" style="width:400px;height:132px" aria-label="Comfortable player"></article></section>
+    <section class="example expanded"><div class="caption">A little more room<span class="dimensions">440 × 220</span></div><article class="player" style="width:440px;height:220px" aria-label="Expanded player"></article></section>
+  </main>
+  <div class="footer"><b>Interface study.</b> Sample track and original artwork.</div>
+  <div class="hint">Drag to move · Resize from the corner</div>
+  <script>
+    const icons={
+      previous:'<svg viewBox="0 0 20 20" fill="currentColor"><rect x="3" y="4" width="2" height="12" rx=".6"/><path d="M16 4.4a.7.7 0 0 0-1.05-.61L6.9 8.65a1.55 1.55 0 0 0 0 2.7l8.05 4.86A.7.7 0 0 0 16 15.6Z"/></svg>',
+      next:'<svg viewBox="0 0 20 20" fill="currentColor"><rect x="15" y="4" width="2" height="12" rx=".6"/><path d="M4 4.4a.7.7 0 0 1 1.05-.61l8.05 4.86a1.55 1.55 0 0 1 0 2.7L5.05 16.2A.7.7 0 0 1 4 15.6Z"/></svg>',
+      pause:'<svg viewBox="0 0 20 20" fill="currentColor"><rect x="5" y="4" width="3" height="12" rx=".7"/><rect x="12" y="4" width="3" height="12" rx=".7"/></svg>',
+      play:'<svg viewBox="0 0 20 20" fill="currentColor"><path d="M6 4.3a.8.8 0 0 1 1.2-.69l8.1 5.7a.85.85 0 0 1 0 1.38l-8.1 5.7A.8.8 0 0 1 6 15.7Z"/></svg>',
+      heart:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"><path d="M10 17s-7-4.35-7-9.1C3 3.4 8.1 2.8 10 6c1.9-3.2 7-2.6 7 1.9C17 12.65 10 17 10 17Z"/></svg>',
+      volume:'<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h3l4-4v14l-4-4H3Z"/><path d="M13 6c2 2 2 6 0 8m3-11c4 4 4 10 0 14"/></svg>'
+    };
+    document.querySelectorAll('.player').forEach((player,index)=>{
+      player.innerHTML=`<div class="main"><div class="cover"><img src="../docs/artwork.svg" alt="Abstract mint-colored album artwork"><span class="playing-dot" title="Playing"></span></div><div class="metadata"><div class="title" title="Tides">Tides</div><div class="artist" title="Mira Vale">Mira Vale</div><div class="album" title="After the quiet">After the quiet</div></div><div class="actions"><button aria-label="Previous track" title="Previous">${icons.previous}</button><button class="play" aria-label="Pause" title="Pause">${icons.pause}</button><button aria-label="Next track" title="Next">${icons.next}</button><button class="like" aria-label="Save track" title="Save track" aria-pressed="${index===2}">${icons.heart}</button></div></div><div class="detail"><div class="rail" aria-label="Playback progress"><span class="filled"></span></div><div class="bottom"><span class="time">1:24</span><span class="duration">/ 3:48</span><div class="volume">${icons.volume}<div class="rail"><span class="filled"></span></div></div></div></div>`;
+      const update=()=>{const {width,height}=player.getBoundingClientRect();player.dataset.layout=width>=400&&height>=190?'expanded':width>=380&&height>=126?'comfortable':'compact';};
+      new ResizeObserver(update).observe(player);update();
+      const play=player.querySelector('.play');
+      play.addEventListener('click',()=>{const paused=player.classList.toggle('paused');play.innerHTML=paused?icons.play:icons.pause;play.setAttribute('aria-label',paused?'Play':'Pause');play.title=paused?'Play':'Pause';player.querySelector('.playing-dot').title=paused?'Paused':'Playing';});
+      const like=player.querySelector('.like');
+      like.addEventListener('click',()=>{const saved=like.getAttribute('aria-pressed')!=='true';like.setAttribute('aria-pressed',saved);like.title=saved?'Remove saved track':'Save track';like.setAttribute('aria-label',like.title);});
+      const wrapper=player.closest('.example');
+      player.querySelector('.main').addEventListener('pointerdown',e=>{if(e.target.closest('button')||window.innerWidth<=1100)return;const start=wrapper.getBoundingClientRect();const scene=document.querySelector('.scene').getBoundingClientRect();const x=e.clientX,y=e.clientY;const main=player.querySelector('.main');main.setPointerCapture(e.pointerId);const move=ev=>{wrapper.style.left=`${Math.max(0,Math.min(1440-player.offsetWidth,start.left-scene.left+ev.clientX-x))}px`;wrapper.style.top=`${Math.max(140,Math.min(790-player.offsetHeight,start.top-scene.top+ev.clientY-y))}px`;};const stop=()=>{main.removeEventListener('pointermove',move);main.removeEventListener('pointerup',stop);};main.addEventListener('pointermove',move);main.addEventListener('pointerup',stop);});
+    });
+  </script>
+</body>
+</html>
