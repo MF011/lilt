@@ -92,6 +92,7 @@ public static class NativeSmokeChecks
                 window.Width = test.Width;
                 window.Height = test.Height;
                 window.UpdateLayout();
+                behavior.RestoreToVisibleScreen();
                 await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
                 window.UpdateLayout();
 

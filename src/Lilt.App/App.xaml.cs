@@ -34,10 +34,10 @@ public partial class App : Application
     private Task<bool>? _restoreTask;
     private int _accountGeneration;
     private bool _accountActive;
+    private PlaybackSnapshot _lastLocalSnapshot = PlaybackSnapshot.Empty;
     private bool _connecting;
     private bool _quitting;
     private bool _smokeTest;
-    private DateTimeOffset _lastRefresh = DateTimeOffset.MinValue;
     private string? _savedTrack;
     private bool? _savedValue;
     private DateTimeOffset _savedCheckedAt = DateTimeOffset.MinValue;
@@ -188,8 +188,13 @@ public partial class App : Application
         Dispatcher.BeginInvoke(() =>
         {
             if (_quitting) return;
+            var previous = _lastLocalSnapshot;
+            _lastLocalSnapshot = snapshot;
+            var mediaChanged = previous.Title != snapshot.Title || previous.Artist != snapshot.Artist ||
+                previous.Album != snapshot.Album || previous.IsPlaying != snapshot.IsPlaying || previous.IsAvailable != snapshot.IsAvailable;
             if (!_accountActive) ApplySnapshot(snapshot, account: false);
-            if (_spotify.IsConnected && DateTimeOffset.UtcNow - _lastRefresh > TimeSpan.FromSeconds(2))
+            // Timeline ticks animate locally; they must not turn into Web API polling.
+            if (_spotify.IsConnected && mediaChanged)
                 _ = RefreshAccountAsync();
         });
     }
@@ -212,7 +217,6 @@ public partial class App : Application
                 UseLocalFallback($"Local controls · account retry at {retryAfter.LocalDateTime:HH:mm}");
                 return;
             }
-            _lastRefresh = DateTimeOffset.UtcNow;
             var snapshot = await _spotify.GetPlaybackAsync(_lifetime.Token);
             if (_quitting || generation != _accountGeneration || !_spotify.IsConnected) return;
             _accountActive = snapshot is { IsAvailable: true };
