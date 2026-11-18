@@ -41,9 +41,11 @@ Check("Extreme saved coordinates remain valid for Windows", () => Equal<double?>
 Check("Tint opacity cannot hide the widget", () => Equal(.18, new WidgetSettings { GlassOpacity = 0 }.Validated().GlassOpacity));
 Check("Settings round trip keeps user preferences", () =>
 {
-    var settings = new WidgetSettings { Width = 480, Height = 220, Left = -800, Top = 45, IgnoreClicks = true, Topmost = false, GlassOpacity = .6 };
+    var settings = new WidgetSettings { Width = 480, Height = 220, Left = -800, Top = 45, IgnoreClicks = true, Topmost = false, GlassOpacity = .6, Refraction = true };
     Equal(settings, JsonSerializer.Deserialize<WidgetSettings>(JsonSerializer.Serialize(settings))!.Validated());
 });
+
+checks.AddRange(LensChecks.Cases());
 
 var failed = 0;
 foreach (var check in checks)

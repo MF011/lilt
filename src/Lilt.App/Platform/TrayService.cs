@@ -14,6 +14,7 @@ public sealed class TrayService : IDisposable
     private readonly Forms.ToolStripMenuItem _ignore = new("Ignore clicks") { CheckOnClick = true, ShortcutKeyDisplayString = "Ctrl+Alt+Shift+L" };
     private readonly Forms.ToolStripMenuItem _topmost = new("Always on top") { CheckOnClick = true };
     private readonly Forms.ToolStripMenuItem _glass = new("Glass") { CheckOnClick = true };
+    private readonly Forms.ToolStripMenuItem _refraction = new("Refraction") { CheckOnClick = true };
     private readonly Forms.ToolStripMenuItem _startup = new("Start with Windows") { CheckOnClick = true };
     private readonly Forms.ToolStripMenuItem _connect = new("Connect Spotify…");
     private readonly Forms.ToolStripMenuItem _disconnect = new("Disconnect Spotify");
@@ -26,6 +27,7 @@ public sealed class TrayService : IDisposable
     public event Action<bool>? IgnoreClicksChanged;
     public event Action<bool>? TopmostChanged;
     public event Action<bool>? GlassChanged;
+    public event Action<bool>? RefractionChanged;
     public event Action<bool>? StartupChanged;
     public event Action<double>? OpacityChanged;
     public event Action? SettingsRequested;
@@ -51,6 +53,7 @@ public sealed class TrayService : IDisposable
         _ignore.CheckedChanged += (_, _) => { if (!_updating) IgnoreClicksChanged?.Invoke(_ignore.Checked); };
         _topmost.CheckedChanged += (_, _) => { if (!_updating) TopmostChanged?.Invoke(_topmost.Checked); };
         _glass.CheckedChanged += (_, _) => { if (!_updating) GlassChanged?.Invoke(_glass.Checked); };
+        _refraction.CheckedChanged += (_, _) => { if (!_updating) RefractionChanged?.Invoke(_refraction.Checked); };
         _startup.CheckedChanged += (_, _) => { if (!_updating) StartupChanged?.Invoke(_startup.Checked); };
         _connect.Click += (_, _) => ConnectRequested?.Invoke();
         _disconnect.Click += (_, _) => DisconnectRequested?.Invoke();
@@ -71,6 +74,7 @@ public sealed class TrayService : IDisposable
         _menu.Items.Add(_ignore);
         _menu.Items.Add(_topmost);
         _menu.Items.Add(_glass);
+        _menu.Items.Add(_refraction);
         _menu.Items.Add(opacity);
         _menu.Items.Add(new Forms.ToolStripSeparator());
         _menu.Items.Add(MenuItem("Settings…", () => SettingsRequested?.Invoke()));
@@ -86,7 +90,8 @@ public sealed class TrayService : IDisposable
     }
 
     public void SetState(bool isVisible, bool ignoreClicks, bool topmost, bool isConnected,
-        string? status = null, bool glass = true, bool startup = false, double opacity = WidgetSettings.DefaultGlassOpacity)
+        string? status = null, bool glass = true, bool startup = false, double opacity = WidgetSettings.DefaultGlassOpacity,
+        bool refraction = false, bool? refractionAvailable = null)
     {
         _updating = true;
         try
@@ -95,6 +100,9 @@ public sealed class TrayService : IDisposable
             _ignore.Checked = ignoreClicks;
             _topmost.Checked = topmost;
             _glass.Checked = glass;
+            _refraction.Enabled = glass;
+            _refraction.Checked = refraction;
+            _refraction.Text = glass && refraction && refractionAvailable == false ? "Refraction (unavailable)" : "Refraction";
             _startup.Checked = startup;
             _connect.Visible = !isConnected;
             _disconnect.Visible = isConnected;

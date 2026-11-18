@@ -11,6 +11,7 @@ public sealed record WidgetSettings
     public double GlassOpacity { get; init; } = DefaultGlassOpacity;
     public bool Topmost { get; init; } = true;
     public bool Glass { get; init; } = true;
+    public bool Refraction { get; init; }
     public bool IgnoreClicks { get; init; }
 
     public WidgetSettings Validated() => this with

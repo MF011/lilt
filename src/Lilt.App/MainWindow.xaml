@@ -163,6 +163,11 @@
         </Style>
     </Window.Resources>
     <Grid Background="Transparent">
+        <Border CornerRadius="22" IsHitTestVisible="False">
+            <Border.Background>
+                <ImageBrush ImageSource="{Binding RefractedBackground}" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality" />
+            </Border.Background>
+        </Border>
         <Border CornerRadius="22" Opacity="{Binding GlassOpacity}" IsHitTestVisible="False">
             <Border.Background>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
@@ -244,7 +249,7 @@
                         <Path Width="18" Height="18" Stretch="Uniform" Data="{StaticResource HeartIcon}" Fill="{Binding HeartFill}" Stroke="{Binding HeartStroke}" StrokeThickness="1.65" StrokeLineJoin="Round" />
                     </Button>
                     <Border Width="12" Height="12" CornerRadius="6" Background="#151D21" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-3,-3" ToolTip="{Binding StatusLabel}">
-                        <Ellipse Width="6" Height="6" Fill="{Binding StatusBrush}" />
+                        <Ellipse x:Name="StatusMarker" Width="6" Height="6" Fill="{Binding StatusBrush}" />
                     </Border>
                 </Grid>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Effect="{StaticResource ContentShadow}">

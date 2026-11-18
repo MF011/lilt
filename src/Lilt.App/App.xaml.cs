@@ -21,6 +21,7 @@ public partial class App : Application
     private WidgetViewModel _viewModel = null!;
     private MainWindow _widget = null!;
     private WindowBehavior _windowBehavior = null!;
+    private GlassLens? _lens;
     private TrayService _tray = null!;
     private SpotifyMediaService _local = null!;
     private SpotifyClient _spotify = null!;
@@ -108,6 +109,9 @@ public partial class App : Application
             _viewModel.VolumeRequested += percent => _ = SetVolumeAsync(percent);
             _widget.Show();
             _windowBehavior.RestoreToVisibleScreen();
+            _lens = new GlassLens(_widget, _viewModel, _windowBehavior);
+            _lens.AvailabilityChanged += UpdateTray;
+            if (!_smokeTest) _lens.SetEnabled(_settings.Glass && _settings.Refraction);
             UpdateTray();
             _positionTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
                 (_, _) => _viewModel.Tick(), Dispatcher);
@@ -163,6 +167,14 @@ public partial class App : Application
         {
             _settings = _settings with { Glass = value };
             _viewModel.OpaqueBackground = !value;
+            _lens?.SetEnabled(value && _settings.Refraction);
+            SaveSettings();
+            UpdateTray();
+        };
+        _tray.RefractionChanged += value =>
+        {
+            _settings = _settings with { Refraction = value };
+            _lens?.SetEnabled(_settings.Glass && value);
             SaveSettings();
             UpdateTray();
         };
@@ -455,7 +467,7 @@ public partial class App : Application
         bool startup;
         try { startup = StartupRegistration.IsEnabled(); } catch { startup = false; }
         _tray.SetState(_widget.IsVisible, _settings.IgnoreClicks, _settings.Topmost, _spotify?.IsConnected == true,
-            _status, _settings.Glass, startup, _settings.GlassOpacity);
+            _status, _settings.Glass, startup, _settings.GlassOpacity, _settings.Refraction, _lens?.IsAvailable);
     }
 
     private void QueueSave()
@@ -538,6 +550,7 @@ public partial class App : Application
         _signInCancellation?.Cancel();
         _accountWindow?.Close();
         _tray?.Dispose();
+        _lens?.Dispose();
         _windowBehavior?.Dispose();
         await _refreshGate.WaitAsync();
         await _commandGate.WaitAsync();
@@ -551,6 +564,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _lens?.Dispose();
         _tray?.Dispose();
         _instance?.Dispose();
         base.OnExit(e);

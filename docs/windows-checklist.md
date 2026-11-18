@@ -33,6 +33,8 @@ Record the Windows build, display scaling, graphics adapter, Spotify version and
 - [ ] Check dark, light and moving backgrounds for readable text and clean edges.
 - [ ] Disable Windows transparency effects. Check that the glass still shows the desktop through it.
 - [ ] Change the glass tint and toggle Glass off. Confirm the tint changes and the solid mode stays readable.
+- [ ] Enable **Refraction** over a window with straight lines. Confirm the lines bend at the rim and follow the window as it changes. Check that the card's text, artwork and controls stay sharp.
+- [ ] Drag, resize and hide the card with **Refraction** enabled. Confirm the effect resumes after the gesture or when the card is shown.
 - [ ] Try a borderless game. Record its behaviour; do not mark exclusive fullscreen as supported.
 
 ## Playback

@@ -29,6 +29,8 @@ The tray remains usable while click-through is on.
 
 **Glass** lets the desktop show through the card. Choose a tint under **Glass opacity**, or turn **Glass** off for a solid background.
 
+Turn on **Refraction** in the tray to bend the image behind the card. Lilt samples only the area at the card, keeps the pixels in memory, and pauses the effect while you move or resize it. If Windows includes Lilt in the sample, the tray shows **Refraction (unavailable)** and the card uses plain glass.
+
 ## Connect Spotify
 
 Playback works locally without a Spotify developer app. Likes need an API connection using your own Client ID. No client secret is required.

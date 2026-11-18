@@ -13,6 +13,7 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
 {
     private PlaybackSnapshot _snapshot = PlaybackSnapshot.Empty;
     private BitmapSource? _artwork;
+    private BitmapSource? _refractedBackground;
     private WidgetSize _size;
     private bool _busy;
     private bool _likeEnabled;
@@ -53,6 +54,11 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
     public bool IsAvailable => Snapshot.IsAvailable;
     public bool HasArtwork => Artwork is not null;
     public BitmapSource? Artwork => _artwork;
+    public BitmapSource? RefractedBackground
+    {
+        get => _refractedBackground;
+        internal set => Set(ref _refractedBackground, value);
+    }
     public bool ShowAlbum => Size != WidgetSize.Compact && !string.IsNullOrWhiteSpace(Album);
     public bool IsExpanded => Size == WidgetSize.Expanded;
     public bool ShowVolume => IsExpanded && Snapshot.CanSetVolume;

@@ -91,7 +91,7 @@ public static class NativeSmokeChecks
             if (Environment.GetCommandLineArgs().Contains("--pointer-check", StringComparer.OrdinalIgnoreCase))
             {
                 await CheckPointerGesturesAsync(window, handle, report);
-                await CheckDesktopGlassAsync(window, handle, vm, output, report);
+                await CheckDesktopGlassAsync(window, handle, vm, behavior, output, report);
             }
 
             foreach (var test in new[]
@@ -153,7 +153,7 @@ public static class NativeSmokeChecks
 
                 var albumVisible = elements.OfType<TextBlock>().Any(text => text.Text == sample.Album);
                 Require(albumVisible == (test.Size != WidgetSize.Compact), $"{test.Name}: album visibility does not match the layout.");
-                var cover = elements.OfType<Border>().SingleOrDefault(border => border.Background is ImageBrush);
+                var cover = Descendants(coverHost!).OfType<Border>().SingleOrDefault(border => border.IsVisible && border.Background is ImageBrush);
                 Require(cover is not null && cover.ActualWidth >= 40 && cover.ActualHeight >= 40, $"{test.Name}: the album cover is missing.");
                 RequireInside(content, cover!, test.Name);
 
@@ -299,7 +299,8 @@ public static class NativeSmokeChecks
         await Task.Delay(120);
     }
 
-    private static async Task CheckDesktopGlassAsync(MainWindow window, IntPtr handle, WidgetViewModel vm, string output, List<string> report)
+    private static async Task CheckDesktopGlassAsync(MainWindow window, IntPtr handle, WidgetViewModel vm, WindowBehavior behavior,
+        string output, List<string> report)
     {
         var panel = new Border { Background = Brushes.Black };
         var backdrop = new Window
@@ -346,12 +347,66 @@ public static class NativeSmokeChecks
             using var solid = ReadDesktop(rect);
             Require(solid.GetPixel(x, y).R < light.GetPixel(x, y).R - 20, "Glass off did not restore the opaque card.");
             report.Add($"Desktop glass: the same interior pixel changed by {difference}/255 red over black and white backgrounds.");
+            vm.OpaqueBackground = false;
+            await CheckDesktopRefractionAsync(window, rect, vm, behavior, panel, output, report);
         }
         finally
         {
             vm.OpaqueBackground = originalOpaque;
             backdrop.Close();
         }
+    }
+
+    private static async Task CheckDesktopRefractionAsync(MainWindow window, NativeMethods.Rect rect, WidgetViewModel vm,
+        WindowBehavior behavior, Border panel, string output, List<string> report)
+    {
+        panel.Background = CreateGridBrush(Color.FromRgb(28, 160, 151));
+        await Task.Delay(200);
+        using var plain = ReadDesktop(rect);
+        plain.Save(Path.Combine(output, "refraction-off.png"), System.Drawing.Imaging.ImageFormat.Png);
+
+        using var lens = new GlassLens(window, vm, behavior);
+        lens.SetEnabled(true);
+        for (var attempt = 0; attempt < 30 && vm.RefractedBackground is null; attempt++)
+            await Task.Delay(100);
+
+        Require(lens.IsAvailable == true && vm.RefractedBackground is not null,
+            "Refraction could not obtain a desktop sample without the widget's own layer.");
+        using var refracted = ReadDesktop(rect);
+        refracted.Save(Path.Combine(output, "refraction-on.png"), System.Drawing.Imaging.ImageFormat.Png);
+        var firstFrame = EncodePng(vm.RefractedBackground!);
+
+        panel.Background = CreateGridBrush(Color.FromRgb(211, 117, 81));
+        var changed = false;
+        for (var attempt = 0; attempt < 20 && !changed; attempt++)
+        {
+            await Task.Delay(100);
+            if (vm.RefractedBackground is { } frame) changed = !EncodePng(frame).AsSpan().SequenceEqual(firstFrame);
+        }
+        Require(changed, "Refraction did not update when the window behind the card changed.");
+        lens.SetEnabled(false);
+        Require(vm.RefractedBackground is null, "Disabling refraction did not clear the lens frame.");
+        report.Add("Desktop refraction: the capture excluded the card, the lens rendered, and changing the backdrop updated the frame.");
+    }
+
+    private static DrawingBrush CreateGridBrush(Color color)
+    {
+        var drawing = new DrawingGroup();
+        using (var context = drawing.Open())
+        {
+            context.DrawRectangle(new SolidColorBrush(Color.FromRgb(16, 29, 48)), null, new Rect(0, 0, 32, 32));
+            var line = new Pen(new SolidColorBrush(color), 2);
+            context.DrawLine(line, new Point(3, 0), new Point(3, 32));
+            context.DrawLine(line, new Point(0, 3), new Point(32, 3));
+        }
+        drawing.Freeze();
+        return new DrawingBrush(drawing)
+        {
+            TileMode = TileMode.Tile,
+            ViewportUnits = BrushMappingMode.Absolute,
+            Viewport = new Rect(0, 0, 32, 32),
+            Stretch = Stretch.Fill
+        };
     }
 
     private static void SendMouseButton(uint flags)
