@@ -16,11 +16,17 @@ internal sealed class GlassLens : IDisposable
     private readonly DispatcherTimer _timer;
     private DesktopLensCapture? _capture;
     private DesktopLensCapture? _probe;
+    private WindowLensCapture? _windowCapture;
+    private Task<WindowFrame>? _pending;
     private LensRefraction? _renderer;
     private WriteableBitmap? _bitmap;
     private byte[]? _output;
     private CaptureSize _size;
     private long _nextProbe;
+    private long _retryWindowAt;
+    private long _windowRequestedAt;
+    private int _requestGeneration;
+    private bool _desktopExcludesWidget;
     private bool _enabled;
     private bool _disposed;
 
@@ -56,6 +62,7 @@ internal sealed class GlassLens : IDisposable
             _capture ??= new DesktopLensCapture();
             _probe ??= new DesktopLensCapture();
             _nextProbe = 0;
+            _retryWindowAt = 0;
             _timer.Start();
         }
         else
@@ -72,6 +79,7 @@ internal sealed class GlassLens : IDisposable
         {
             _viewModel.RefractedBackground = null;
             _nextProbe = 0;
+            _requestGeneration++;
             return;
         }
 
@@ -86,49 +94,103 @@ internal sealed class GlassLens : IDisposable
         if (now >= _nextProbe)
         {
             _nextProbe = now + 1500;
-            SetAvailability(VerifySelfExclusion(marker));
-        }
-        if (IsAvailable != true)
-        {
-            _viewModel.RefractedBackground = null;
-            return;
+            _desktopExcludesWidget = VerifySelfExclusion(marker);
         }
 
         var width = rect.Right - rect.Left;
         var height = rect.Bottom - rect.Top;
         var dpi = VisualTreeHelper.GetDpi(_window).DpiScaleX;
+        if (width < 2 || height < 2) return;
         var padding = (int)Math.Ceiling(24 * dpi);
-        if (!_capture!.TryCapture(rect.Left - padding, rect.Top - padding, width + padding * 2, height + padding * 2, out var pixels))
+        if (_desktopExcludesWidget && TryCaptureDesktop(rect, padding, marker, out var pixels, out var usedPadding))
         {
-            padding = 0;
+            Paint(pixels, new CaptureSize(width, height, usedPadding, dpi));
+            return;
+        }
+        RenderWindowBehind(new WindowRequest(handle, rect, new CaptureSize(width, height, padding, dpi), _requestGeneration), now);
+    }
+
+    private bool TryCaptureDesktop(NativeMethods.Rect rect, int padding, Marker marker, out byte[] pixels, out int usedPadding)
+    {
+        var width = rect.Right - rect.Left;
+        var height = rect.Bottom - rect.Top;
+        usedPadding = padding;
+        if (!_capture!.TryCapture(rect.Left - padding, rect.Top - padding, width + padding * 2, height + padding * 2, out pixels))
+        {
+            usedPadding = 0;
             if (!_capture.TryCapture(rect.Left, rect.Top, width, height, out pixels))
+                return false;
+        }
+
+        if (!MatchesMarker(pixels, (width + usedPadding * 2) * 4, height + usedPadding * 2,
+            marker.X - rect.Left + usedPadding, marker.Y - rect.Top + usedPadding, marker.Color)) return true;
+        _desktopExcludesWidget = false;
+        return false;
+    }
+
+    private void RenderWindowBehind(WindowRequest request, long now)
+    {
+        if (_pending is { } pending)
+        {
+            if (!pending.IsCompleted)
             {
-                Unavailable(now);
+                if (now - _windowRequestedAt > 600)
+                {
+                    _viewModel.RefractedBackground = null;
+                    SetAvailability(false);
+                }
                 return;
+            }
+            _pending = null;
+            var completed = pending.GetAwaiter().GetResult();
+            if (completed.Request == request)
+            {
+                if (completed.Pixels.Length > 0)
+                    Paint(completed.Pixels, request.Size with { Padding = completed.Padding });
+                else
+                {
+                    _viewModel.RefractedBackground = null;
+                    SetAvailability(false);
+                    _retryWindowAt = now + 350;
+                }
             }
         }
 
-        var stride = (width + padding * 2) * 4;
-        if (MatchesMarker(pixels, stride, height + padding * 2,
-            marker.X - rect.Left + padding, marker.Y - rect.Top + padding, marker.Color))
-        {
-            Unavailable(now);
-            return;
-        }
+        if (now < _retryWindowAt) return;
+        var capture = _windowCapture ??= new WindowLensCapture();
+        // Responding to a print request runs on the source app's thread. Keep it
+        // off Lilt's dispatcher, with at most one in-flight capture.
+        _windowRequestedAt = now;
+        _pending = Task.Run(() => CaptureWindow(capture, request));
+    }
 
-        var size = new CaptureSize(width, height, padding, dpi);
+    private static WindowFrame CaptureWindow(WindowLensCapture capture, WindowRequest request)
+    {
+        var size = request.Size;
+        var rect = request.Rect;
+        var padding = size.Padding;
+        if (capture.TryCapture(request.Handle, rect.Left - padding, rect.Top - padding,
+            size.Width + padding * 2, size.Height + padding * 2, out var pixels))
+            return new WindowFrame(request, padding, pixels);
+        return new WindowFrame(request, 0, capture.TryCapture(request.Handle, rect.Left, rect.Top,
+            size.Width, size.Height, out pixels) ? pixels : []);
+    }
+
+    private void Paint(byte[] pixels, CaptureSize size)
+    {
         if (_renderer is null || size != _size)
         {
-            _renderer = new LensRefraction(width, height, padding, dpi);
+            _renderer = new LensRefraction(size.Width, size.Height, size.Padding, size.Dpi);
             _size = size;
             _bitmap = new WriteableBitmap(_renderer.OutputWidth, _renderer.OutputHeight, 96, 96, PixelFormats.Bgra32, null);
             _output = new byte[_renderer.OutputWidth * _renderer.OutputHeight * 4];
         }
 
         var outputStride = _renderer.OutputWidth * 4;
-        _renderer.Render(pixels, stride, _output!, outputStride, soften: true);
+        _renderer.Render(pixels, _renderer.SourceWidth * 4, _output!, outputStride, soften: true);
         _bitmap!.WritePixels(new Int32Rect(0, 0, _bitmap.PixelWidth, _bitmap.PixelHeight), _output!, outputStride, 0);
         _viewModel.RefractedBackground = _bitmap;
+        SetAvailability(true);
     }
 
     private bool TryGetMarker(out Marker marker)
@@ -174,13 +236,6 @@ internal sealed class GlassLens : IDisposable
         return false;
     }
 
-    private void Unavailable(long now)
-    {
-        _viewModel.RefractedBackground = null;
-        _nextProbe = now + 1500;
-        SetAvailability(false);
-    }
-
     private void SetAvailability(bool? value)
     {
         if (IsAvailable == value) return;
@@ -190,11 +245,20 @@ internal sealed class GlassLens : IDisposable
 
     private void ReleaseFrames()
     {
+        _requestGeneration++;
         _viewModel.RefractedBackground = null;
         _capture?.Dispose();
         _probe?.Dispose();
         _capture = null;
         _probe = null;
+        if (_windowCapture is { } capture)
+        {
+            if (_pending is { IsCompleted: false } task)
+                _ = task.ContinueWith(_ => capture.Dispose(), TaskScheduler.Default);
+            else
+                capture.Dispose();
+            _windowCapture = null;
+        }
         _renderer = null;
         _output = null;
         _bitmap = null;
@@ -211,5 +275,7 @@ internal sealed class GlassLens : IDisposable
     }
 
     private readonly record struct CaptureSize(int Width, int Height, int Padding, double Dpi);
+    private readonly record struct WindowRequest(IntPtr Handle, NativeMethods.Rect Rect, CaptureSize Size, int Generation);
+    private readonly record struct WindowFrame(WindowRequest Request, int Padding, byte[] Pixels);
     private readonly record struct Marker(int X, int Y, Color Color);
 }

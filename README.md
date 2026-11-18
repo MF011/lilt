@@ -29,7 +29,7 @@ The tray remains usable while click-through is on.
 
 **Glass** lets the desktop show through the card. Choose a tint under **Glass opacity**, or turn **Glass** off for a solid background.
 
-Turn on **Refraction** in the tray to bend the image behind the card. Lilt samples only the area at the card, keeps the pixels in memory, and pauses the effect while you move or resize it. If Windows includes Lilt in the sample, the tray shows **Refraction (unavailable)** and the card uses plain glass.
+Turn on **Refraction** in the tray to bend the image behind the card. Lilt keeps sampled pixels in memory and pauses the effect while you move or resize it. If Windows cannot provide the background, Lilt tries the window directly underneath. The card uses plain glass when neither source is available.
 
 ## Connect Spotify
 
