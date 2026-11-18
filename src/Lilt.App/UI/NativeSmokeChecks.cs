@@ -188,6 +188,7 @@ public static class NativeSmokeChecks
         }
         catch (Exception exception)
         {
+            File.WriteAllLines(Path.Combine(output, "layout.txt"), report);
             File.WriteAllText(Path.Combine(output, "failure.txt"), exception.ToString());
             throw;
         }
@@ -300,30 +301,46 @@ public static class NativeSmokeChecks
 
     private static async Task CheckDesktopGlassAsync(MainWindow window, IntPtr handle, WidgetViewModel vm, string output, List<string> report)
     {
+        var panel = new Border { Background = Brushes.Black };
         var backdrop = new Window
         {
-            Left = window.Left - 12, Top = window.Top - 12,
-            Width = window.ActualWidth + 24, Height = window.ActualHeight + 24,
             WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize,
-            ShowActivated = false, ShowInTaskbar = false, Background = Brushes.Black
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            ShowActivated = false, ShowInTaskbar = false, Topmost = true, Content = panel
         };
         var originalOpaque = vm.OpaqueBackground;
-        backdrop.Show();
         try
         {
             Require(NativeMethods.GetWindowRect(handle, out var rect), "Could not locate the widget over the test background.");
-            var x = (rect.Right - rect.Left) / 2;
-            var y = (rect.Bottom - rect.Top) / 10;
+            var width = rect.Right - rect.Left;
+            var height = rect.Bottom - rect.Top;
+            var scale = VisualTreeHelper.GetDpi(window);
+            backdrop.Left = (rect.Left - 12) / scale.DpiScaleX;
+            backdrop.Top = (rect.Top - 12) / scale.DpiScaleY;
+            backdrop.Width = (width + 24) / scale.DpiScaleX;
+            backdrop.Height = (height + 24) / scale.DpiScaleY;
+            backdrop.Show();
+            var backdropHandle = new WindowInteropHelper(backdrop).Handle;
+            Require(NativeMethods.SetWindowPos(backdropHandle, new IntPtr(-1), rect.Left - 12, rect.Top - 12,
+                width + 24, height + 24, NativeMethods.SwpNoActivate), "Could not place the glass test background.");
+            Require(NativeMethods.SetWindowPos(handle, new IntPtr(-1), 0, 0, 0, 0,
+                NativeMethods.SwpNoActivate | NativeMethods.SwpNoMove | NativeMethods.SwpNoSize), "Could not raise the widget above the test background.");
+            var x = width / 2;
+            var y = height / 10;
             vm.OpaqueBackground = false;
-            await Task.Delay(120);
+            var visual = SaveVisual((FrameworkElement)window.Content, Path.Combine(output, "glass-alpha.png"));
+            report.Add($"Rendered glass alpha at the desktop probe: {AlphaAt(visual, .5, .1)}/255.");
+            await Task.Delay(200);
             using var dark = ReadDesktop(rect);
-            backdrop.Background = Brushes.White;
-            await Task.Delay(120);
+            panel.Background = Brushes.White;
+            await Task.Delay(200);
             using var light = ReadDesktop(rect);
-            var difference = light.GetPixel(x, y).R - dark.GetPixel(x, y).R;
-            Require(difference is > 20 and < 245, $"The desktop did not blend through the glass body (difference {difference}).");
             light.Save(Path.Combine(output, "glass-over-white.png"), System.Drawing.Imaging.ImageFormat.Png);
             dark.Save(Path.Combine(output, "glass-over-black.png"), System.Drawing.Imaging.ImageFormat.Png);
+            var cornerDifference = light.GetPixel(0, 0).R - dark.GetPixel(0, 0).R;
+            Require(cornerDifference > 220, $"The test background was not visible at the transparent corner (difference {cornerDifference}).");
+            var difference = light.GetPixel(x, y).R - dark.GetPixel(x, y).R;
+            Require(difference is > 20 and < 245, $"The desktop did not blend through the glass body (difference {difference}).");
             vm.OpaqueBackground = true;
             await Task.Delay(120);
             using var solid = ReadDesktop(rect);
