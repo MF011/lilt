@@ -10,7 +10,12 @@ internal sealed class SettingsStore
 
     public WidgetSettings Load()
     {
-        try { return (JsonSerializer.Deserialize<WidgetSettings>(File.ReadAllText(_file)) ?? new()).Validated(); }
+        try
+        {
+            var settings = (JsonSerializer.Deserialize<WidgetSettings>(File.ReadAllText(_file)) ?? new()).Validated();
+            // The previous Balanced preset included both a Windows accent and a card tint.
+            return settings.GlassOpacity == .72 ? settings with { GlassOpacity = WidgetSettings.DefaultGlassOpacity } : settings;
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return new(); }
     }
 

@@ -8,7 +8,7 @@ Built for Windows 10 22H2 and the Spotify desktop app. Resize the card to make r
 
 - Album art, track, artists, playback status and transport controls.
 - Likes through your Spotify account.
-- Dark glass, adjustable opacity and an always-on-top window.
+- Translucent glass, adjustable opacity and an always-on-top window.
 - Settings in the tray. An optional click-through mode lets you work underneath the card.
 - Local controls without signing in; account controls when connected.
 
@@ -16,7 +16,7 @@ Built for Windows 10 22H2 and the Spotify desktop app. Resize the card to make r
 
 Download `Lilt-win-x64.zip` from [Releases](https://github.com/MF011/lilt/releases), extract it, then open `Lilt.exe`. The portable build includes the .NET runtime.
 
-Start Spotify and play something. Right-click Lilt's tray icon for settings. Drag an empty part of the card to move it; drag its edges to resize it.
+Start Spotify and play something. Drag an empty part of the card to move it. Drag the grip in the bottom-right corner or an edge to resize it. Right-click Lilt's tray icon for settings.
 
 The smallest layout is 288 × 88. It keeps the cover, title, artists and previous/play/next buttons. Hover the cover to like a track. More space reveals the album, then the timeline and available volume controls.
 
@@ -26,6 +26,8 @@ The smallest layout is 288 × 88. It keeps the cover, title, artists and previou
 | `Ctrl+Alt+Shift+L` | Toggle click-through |
 
 The tray remains usable while click-through is on.
+
+**Glass** lets the desktop show through the card. Choose a tint under **Glass opacity**, or turn **Glass** off for a solid background.
 
 ## Connect Spotify
 
@@ -56,7 +58,7 @@ The zip is written to `artifacts/Lilt-win-x64.zip`.
 
 ## Before reporting a bug
 
-This is an early version. Native window behaviour, blur and Spotify's available commands depend on the Windows session and client. Always-on-top covers ordinary windows and borderless games; exclusive fullscreen and Windows security screens are outside that guarantee.
+This is an early version. Spotify's available commands depend on the client and device. Always-on-top covers ordinary windows and borderless games. Exclusive fullscreen and Windows security screens can cover the card.
 
 If something breaks, include your Windows build, Spotify version, playback mode and steps to reproduce it. Never include tokens or the contents of Lilt's local data folder.
 

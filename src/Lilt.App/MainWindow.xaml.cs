@@ -11,6 +11,7 @@ public partial class MainWindow : Window
 {
     private readonly WidgetViewModel _viewModel;
     public event Action? DragRequested;
+    public event Action? ResizeRequested;
 
     public MainWindow(WidgetViewModel viewModel)
     {
@@ -19,8 +20,6 @@ public partial class MainWindow : Window
         DataContext = viewModel;
         viewModel.Size = WidgetLayout.ForSize(Width, Height);
     }
-
-    public void SetGlassOpacity(double opacity) => _viewModel.GlassOpacity = opacity;
 
     private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -32,6 +31,13 @@ public partial class MainWindow : Window
         if (e.ClickCount != 1 || IsInteractive(e.OriginalSource as DependencyObject)) return;
         DragRequested?.Invoke();
         e.Handled = true;
+    }
+
+    private void OnResizeMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount != 1) return;
+        e.Handled = true;
+        ResizeRequested?.Invoke();
     }
 
     private static bool IsInteractive(DependencyObject? source)

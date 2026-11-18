@@ -16,7 +16,7 @@ Record the Windows build, display scaling, graphics adapter, Spotify version and
 
 - [ ] Keep another app active and use play/pause, previous and next. Confirm keyboard focus remains in the other app.
 - [ ] Cover the card with ordinary apps. Confirm always-on-top works when enabled and can be turned off.
-- [ ] Move and resize the card from every edge and corner.
+- [ ] Drag the corner grip outward and back. Move the card by its body, then release over a bright background. Confirm the edges stay clean.
 - [ ] Resize down to the minimum. Confirm all essential controls remain reachable and no text overlaps buttons.
 - [ ] Expand the card. Confirm added details and controls fit without scrollbars.
 - [ ] Enable click-through from the tray. Confirm buttons, dragging and resizing all pass through to the app below.
@@ -31,8 +31,8 @@ Record the Windows build, display scaling, graphics adapter, Spotify version and
 - [ ] Restart and confirm the saved size and position are restored.
 - [ ] Disconnect the monitor that held the card. Confirm it can be recovered on a visible display.
 - [ ] Check dark, light and moving backgrounds for readable text and clean edges.
-- [ ] Disable Windows transparency effects. Confirm the fallback remains readable.
-- [ ] Check drag and resize smoothness with blur enabled.
+- [ ] Disable Windows transparency effects. Check that the glass still shows the desktop through it.
+- [ ] Change the glass tint and toggle Glass off. Confirm the tint changes and the solid mode stays readable.
 - [ ] Try a borderless game. Record its behaviour; do not mark exclusive fullscreen as supported.
 
 ## Playback
@@ -59,4 +59,4 @@ Record the Windows build, display scaling, graphics adapter, Spotify version and
 
 ## Automated startup check
 
-`Lilt.exe --smoke-test` opens the native window and exits automatically. It checks startup and resource loading. It does not prove that glass, input routing, Spotify playback or OAuth works on a real desktop.
+`Lilt.exe --smoke-test` checks startup, layout and rendered transparency, then exits. On a dedicated Windows test desktop, add `--pointer-check` to exercise actual drag and resize gestures and verify glass against black and white backgrounds. It moves the pointer during the check.

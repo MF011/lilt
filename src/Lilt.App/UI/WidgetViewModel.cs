@@ -24,7 +24,7 @@ public sealed class WidgetViewModel : INotifyPropertyChanged
     private string? _notice;
     private double _positionSeconds;
     private double _volumePercent = 50;
-    private double _glassOpacity = .72;
+    private double _glassOpacity = WidgetSettings.DefaultGlassOpacity;
     private bool _opaqueBackground;
     private readonly DelegateCommand _playPause;
     private readonly DelegateCommand _previous;

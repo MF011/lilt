@@ -26,7 +26,7 @@ jobs:
         shell: pwsh
         run: |
           $app = Join-Path $PWD 'artifacts/Lilt-win-x64/Lilt.exe'
-          $process = Start-Process -FilePath $app -ArgumentList '--smoke-test' -PassThru
+          $process = Start-Process -FilePath $app -ArgumentList '--smoke-test', '--pointer-check' -PassThru
           if (-not $process.WaitForExit(20000)) {
             Stop-Process -Id $process.Id -Force
             throw 'Startup check timed out.'

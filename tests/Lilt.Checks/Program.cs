@@ -34,7 +34,7 @@ Check("Window dimensions are bounded after loading", () =>
 Check("Nonfinite settings recover to usable values", () =>
 {
     var value = new WidgetSettings { Width = double.NaN, Height = double.PositiveInfinity, Left = double.NegativeInfinity, Top = double.NaN, GlassOpacity = double.NaN }.Validated();
-    Equal(320d, value.Width); Equal(96d, value.Height); Equal<double?>(null, value.Left); Equal<double?>(null, value.Top); Equal(.72, value.GlassOpacity);
+    Equal(320d, value.Width); Equal(96d, value.Height); Equal<double?>(null, value.Left); Equal<double?>(null, value.Top); Equal(.48, value.GlassOpacity);
 });
 Check("Negative monitor coordinates are preserved", () => Equal<double?>(-1920, new WidgetSettings { Left = -1920 }.Validated().Left));
 Check("Extreme saved coordinates remain valid for Windows", () => Equal<double?>(100000, new WidgetSettings { Left = double.MaxValue }.Validated().Left));

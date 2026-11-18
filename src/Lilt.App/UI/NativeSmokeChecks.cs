@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
@@ -25,6 +26,9 @@ public static class NativeSmokeChecks
         var originalArtwork = vm.Artwork is { } artwork ? EncodePng(artwork) : null;
         var originalWidth = window.Width;
         var originalHeight = window.Height;
+        var originalLeft = window.Left;
+        var originalTop = window.Top;
+        var originalOpaque = vm.OpaqueBackground;
         var originalBusy = vm.Busy;
         var originalLikeEnabled = vm.LikeEnabled;
         var originalSaved = vm.IsSaved;
@@ -39,18 +43,20 @@ public static class NativeSmokeChecks
         var report = new List<string>
         {
             "Native WPF layout captures from --smoke-test.",
-            "The track and artwork are test fixtures. Desktop blur is not captured by RenderTargetBitmap.",
+            "The track and artwork are test fixtures.",
             ""
         };
 
         try
         {
+            Require(window.AllowsTransparency && window.ResizeMode == ResizeMode.NoResize,
+                "The card needs a per-pixel layer with no native resize frame.");
+            Require((NativeMethods.GetExStyle(handle).ToInt64() & NativeMethods.WsExLayered) != 0,
+                "WPF did not create a per-pixel layer.");
             behavior.SetClickThrough(true);
             var transparentStyle = NativeMethods.GetExStyle(handle).ToInt64();
             Require((transparentStyle & NativeMethods.WsExTransparent) != 0, "Click-through did not set WS_EX_TRANSPARENT.");
             Require((transparentStyle & NativeMethods.WsExLayered) != 0, "Click-through did not set WS_EX_LAYERED.");
-            Require(NativeMethods.GetLayeredWindowAttributes(handle, out _, out var alpha, out var flags) && alpha == 255 && (flags & 2) != 0,
-                "The native click-through surface was not initialized.");
             behavior.SetClickThrough(false);
             Require((NativeMethods.GetExStyle(handle).ToInt64() & NativeMethods.WsExTransparent) == 0,
                 "Click-through could not be disabled.");
@@ -81,6 +87,12 @@ public static class NativeSmokeChecks
             vm.LikeEnabled = true;
             vm.IsSaved = true;
             vm.LikeHint = "Remove from Liked Songs";
+
+            if (Environment.GetCommandLineArgs().Contains("--pointer-check", StringComparer.OrdinalIgnoreCase))
+            {
+                await CheckPointerGesturesAsync(window, handle, report);
+                await CheckDesktopGlassAsync(window, handle, vm, output, report);
+            }
 
             foreach (var test in new[]
             {
@@ -157,7 +169,10 @@ public static class NativeSmokeChecks
                     foreach (var text in elements.OfType<TextBlock>()) RequireInside(content, text, test.Name);
                 }
 
-                SaveVisual(content, Path.Combine(output, test.Name + ".png"));
+                var visual = SaveVisual(content, Path.Combine(output, test.Name + ".png"));
+                Require(AlphaAt(visual, .001, .001) <= 8, $"{test.Name}: the corner is no longer transparent.");
+                var tintAlpha = AlphaAt(visual, .5, .12);
+                Require(tintAlpha is > 28 and < 240, $"{test.Name}: the glass body is not translucent (alpha {tintAlpha}).");
                 await Task.Delay(100);
                 CaptureScreen(window, Path.Combine(output, test.Name + "-screen.png"), report);
                 behavior.SetClickThrough(true);
@@ -181,6 +196,9 @@ public static class NativeSmokeChecks
             behavior.SetClickThrough(originalClickThrough);
             window.Width = originalWidth;
             window.Height = originalHeight;
+            window.Left = originalLeft;
+            window.Top = originalTop;
+            vm.OpaqueBackground = originalOpaque;
             vm.ApplySnapshot(originalSnapshot);
             vm.SetArtwork(originalArtwork);
             vm.Busy = originalBusy;
@@ -212,14 +230,138 @@ public static class NativeSmokeChecks
             $"{layout}: {element.GetType().Name} extends outside the widget ({bounds}).");
     }
 
-    private static void SaveVisual(FrameworkElement element, string file)
+    private static RenderTargetBitmap SaveVisual(FrameworkElement element, string file)
     {
         var dpi = VisualTreeHelper.GetDpi(element);
         var image = new RenderTargetBitmap((int)Math.Ceiling(element.ActualWidth * dpi.DpiScaleX),
             (int)Math.Ceiling(element.ActualHeight * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
         image.Render(element);
         File.WriteAllBytes(file, EncodePng(image));
+        return image;
     }
+
+    private static byte AlphaAt(BitmapSource image, double x, double y)
+    {
+        var pixel = new byte[4];
+        image.CopyPixels(new Int32Rect((int)(image.PixelWidth * x), (int)(image.PixelHeight * y), 1, 1), pixel, 4, 0);
+        return pixel[3];
+    }
+
+    private static async Task CheckPointerGesturesAsync(MainWindow window, IntPtr handle, List<string> report)
+    {
+        var workArea = SystemParameters.WorkArea;
+        window.Left = workArea.Left + 40;
+        window.Top = workArea.Top + 40;
+        window.UpdateLayout();
+        await Task.Delay(150);
+        Require(NativeMethods.GetWindowRect(handle, out var start), "Could not locate the widget for pointer checks.");
+        Require(GetCursorPos(out var originalPointer), "Could not read the desktop pointer.");
+        try
+        {
+            var scale = VisualTreeHelper.GetDpi(window).DpiScaleX;
+            var inset = (int)Math.Ceiling(13 * scale);
+            await DragPointerAsync(start.Right - inset, start.Bottom - inset, 90, 72);
+            Require(NativeMethods.GetWindowRect(handle, out var resized), "Could not read the resized widget bounds.");
+            Require(resized.Right - resized.Left >= start.Right - start.Left + 70 &&
+                    resized.Bottom - resized.Top >= start.Bottom - start.Top + 55,
+                $"Dragging the visible corner did not resize the card ({start.Right - start.Left} × {start.Bottom - start.Top} to {resized.Right - resized.Left} × {resized.Bottom - resized.Top}).");
+            await DragPointerAsync((resized.Left + resized.Right) / 2, resized.Top + inset, 32, 24);
+            Require(NativeMethods.GetWindowRect(handle, out var moved), "Could not read the moved widget bounds.");
+            Require(Math.Abs(moved.Left - resized.Left - 32) <= 2 && Math.Abs(moved.Top - resized.Top - 24) <= 2,
+                "Dragging the body did not move the card.");
+            Require(moved.Right - moved.Left == resized.Right - resized.Left && moved.Bottom - moved.Top == resized.Bottom - resized.Top,
+                "Moving the card changed its size.");
+            window.UpdateLayout();
+            var content = (FrameworkElement)window.Content;
+            Require(Math.Abs(content.ActualWidth - window.ActualWidth) < 1 && Math.Abs(content.ActualHeight - window.ActualHeight) < 1,
+                "A native frame appeared after releasing the pointer.");
+            Require(Math.Abs(window.Width - (moved.Right - moved.Left) / scale) < 2 &&
+                    Math.Abs(window.Height - (moved.Bottom - moved.Top) / scale) < 2,
+                "The resized dimensions were not retained by WPF.");
+            report.Add("Desktop pointer: corner resize and body move completed without a native frame.");
+        }
+        finally { SetCursorPos(originalPointer.X, originalPointer.Y); }
+    }
+
+    private static async Task DragPointerAsync(int x, int y, int dx, int dy)
+    {
+        Require(SetCursorPos(x, y), "Could not place the desktop pointer.");
+        await Task.Delay(120);
+        SendMouseButton(0x0002);
+        try
+        {
+            await Task.Delay(100);
+            Require(SetCursorPos(x + dx, y + dy), "Could not move the desktop pointer.");
+            await Task.Delay(180);
+        }
+        finally { SendMouseButton(0x0004); }
+        await Task.Delay(120);
+    }
+
+    private static async Task CheckDesktopGlassAsync(MainWindow window, IntPtr handle, WidgetViewModel vm, string output, List<string> report)
+    {
+        var backdrop = new Window
+        {
+            Left = window.Left - 12, Top = window.Top - 12,
+            Width = window.ActualWidth + 24, Height = window.ActualHeight + 24,
+            WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize,
+            ShowActivated = false, ShowInTaskbar = false, Background = Brushes.Black
+        };
+        var originalOpaque = vm.OpaqueBackground;
+        backdrop.Show();
+        try
+        {
+            Require(NativeMethods.GetWindowRect(handle, out var rect), "Could not locate the widget over the test background.");
+            var x = (rect.Right - rect.Left) / 2;
+            var y = (rect.Bottom - rect.Top) / 10;
+            vm.OpaqueBackground = false;
+            await Task.Delay(120);
+            using var dark = ReadDesktop(rect);
+            backdrop.Background = Brushes.White;
+            await Task.Delay(120);
+            using var light = ReadDesktop(rect);
+            var difference = light.GetPixel(x, y).R - dark.GetPixel(x, y).R;
+            Require(difference is > 20 and < 245, $"The desktop did not blend through the glass body (difference {difference}).");
+            light.Save(Path.Combine(output, "glass-over-white.png"), System.Drawing.Imaging.ImageFormat.Png);
+            dark.Save(Path.Combine(output, "glass-over-black.png"), System.Drawing.Imaging.ImageFormat.Png);
+            vm.OpaqueBackground = true;
+            await Task.Delay(120);
+            using var solid = ReadDesktop(rect);
+            Require(solid.GetPixel(x, y).R < light.GetPixel(x, y).R - 20, "Glass off did not restore the opaque card.");
+            report.Add($"Desktop glass: the same interior pixel changed by {difference}/255 red over black and white backgrounds.");
+        }
+        finally
+        {
+            vm.OpaqueBackground = originalOpaque;
+            backdrop.Close();
+        }
+    }
+
+    private static void SendMouseButton(uint flags)
+    {
+        var input = new MouseInput { Data = new MouseInputData { Flags = flags } };
+        Require(SendInput(1, ref input, Marshal.SizeOf<MouseInput>()) == 1, "Could not send pointer input to the test desktop.");
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MouseInput { public uint Type; public MouseInputData Data; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MouseInputData { public int X, Y; public uint MouseData, Flags, Time; public UIntPtr ExtraInfo; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CursorPoint { public int X, Y; }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint count, ref MouseInput input, int size);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out CursorPoint point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetCursorPos(int x, int y);
 
     private static byte[] CreateTestArtwork()
     {
@@ -244,7 +386,20 @@ public static class NativeSmokeChecks
         if (!NativeMethods.GetWindowRect(handle, out var rect)) return;
         try
         {
-            using var bitmap = new System.Drawing.Bitmap(Math.Max(1, rect.Right - rect.Left), Math.Max(1, rect.Bottom - rect.Top));
+            using var bitmap = ReadDesktop(rect);
+            bitmap.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            report.Add("Desktop capture was unavailable in this Windows session.");
+        }
+    }
+
+    private static System.Drawing.Bitmap ReadDesktop(NativeMethods.Rect rect)
+    {
+        var bitmap = new System.Drawing.Bitmap(Math.Max(1, rect.Right - rect.Left), Math.Max(1, rect.Bottom - rect.Top));
+        try
+        {
             using var graphics = System.Drawing.Graphics.FromImage(bitmap);
             var screen = NativeMethods.GetDC(IntPtr.Zero);
             if (screen == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
@@ -262,11 +417,12 @@ public static class NativeSmokeChecks
                 if (target != IntPtr.Zero) graphics.ReleaseHdc(target);
                 NativeMethods.ReleaseDC(IntPtr.Zero, screen);
             }
-            bitmap.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+            return bitmap;
         }
-        catch (System.ComponentModel.Win32Exception)
+        catch
         {
-            report.Add("Desktop capture was unavailable in this Windows session.");
+            bitmap.Dispose();
+            throw;
         }
     }
 

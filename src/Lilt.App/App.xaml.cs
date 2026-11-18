@@ -65,7 +65,11 @@ public partial class App : Application
         {
             _settings = _smokeTest ? new() : _settingsStore.Load();
             System.Windows.Forms.Application.EnableVisualStyles();
-            _viewModel = new WidgetViewModel { GlassOpacity = _settings.GlassOpacity };
+            _viewModel = new WidgetViewModel
+            {
+                GlassOpacity = _settings.GlassOpacity,
+                OpaqueBackground = !_settings.Glass
+            };
             _widget = new MainWindow(_viewModel)
             {
                 Width = _settings.Width, Height = _settings.Height,
@@ -81,19 +85,15 @@ public partial class App : Application
             else
             {
                 _widget.WindowStartupLocation = WindowStartupLocation.Manual;
-                _widget.Left = Math.Max(SystemParameters.WorkArea.Left, SystemParameters.WorkArea.Right - _widget.Width - 24);
-                _widget.Top = Math.Max(SystemParameters.WorkArea.Top, SystemParameters.WorkArea.Bottom - _widget.Height - 24);
+                PlaceAtDefaultPosition();
             }
             _windowBehavior = new WindowBehavior(_widget);
-            _windowBehavior.BackdropChanged += available => _viewModel.OpaqueBackground = !available;
-            _windowBehavior.UpdateCornerRadius(22);
             _windowBehavior.SetTopmost(_settings.Topmost);
-            _windowBehavior.SetOpacity(_settings.GlassOpacity);
-            _windowBehavior.SetBackdrop(_settings.Glass);
             _windowBehavior.SetClickThrough(_settings.IgnoreClicks);
             _windowBehavior.ToggleVisibilityRequested += ToggleVisibility;
             _windowBehavior.ToggleClickThroughRequested += () => SetIgnoreClicks(!_settings.IgnoreClicks);
             _widget.DragRequested += _windowBehavior.TryBeginDrag;
+            _widget.ResizeRequested += _windowBehavior.TryBeginResize;
             _widget.Closing += OnWidgetClosing;
             _widget.LocationChanged += (_, _) => QueueSave();
             _widget.SizeChanged += (_, _) => QueueSave();
@@ -107,7 +107,6 @@ public partial class App : Application
             _viewModel.SeekRequested += position => _ = SeekAsync(position);
             _viewModel.VolumeRequested += percent => _ = SetVolumeAsync(percent);
             _widget.Show();
-            _viewModel.OpaqueBackground = !_windowBehavior.BackdropApplied;
             _windowBehavior.RestoreToVisibleScreen();
             UpdateTray();
             _positionTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
@@ -160,12 +159,17 @@ public partial class App : Application
         _tray.ToggleVisibilityRequested += ToggleVisibility;
         _tray.IgnoreClicksChanged += SetIgnoreClicks;
         _tray.TopmostChanged += value => { _settings = _settings with { Topmost = value }; _windowBehavior.SetTopmost(value); SaveSettings(); UpdateTray(); };
-        _tray.GlassChanged += value => { _settings = _settings with { Glass = value }; _windowBehavior.SetBackdrop(value); SaveSettings(); UpdateTray(); };
+        _tray.GlassChanged += value =>
+        {
+            _settings = _settings with { Glass = value };
+            _viewModel.OpaqueBackground = !value;
+            SaveSettings();
+            UpdateTray();
+        };
         _tray.OpacityChanged += value =>
         {
             _settings = (_settings with { GlassOpacity = value }).Validated();
             _viewModel.GlassOpacity = _settings.GlassOpacity;
-            _windowBehavior.SetOpacity(_settings.GlassOpacity);
             SaveSettings(); UpdateTray();
         };
         _tray.StartupChanged += value =>
@@ -427,9 +431,16 @@ public partial class App : Application
     {
         var defaults = new WidgetSettings();
         _widget.Width = defaults.Width; _widget.Height = defaults.Height;
-        _widget.Left = SystemParameters.WorkArea.Right - _widget.Width - 24;
-        _widget.Top = SystemParameters.WorkArea.Bottom - _widget.Height - 24;
+        PlaceAtDefaultPosition();
         _widget.Show(); _windowBehavior.RestoreToVisibleScreen(); SaveSettings(); UpdateTray();
+    }
+
+    private void PlaceAtDefaultPosition()
+    {
+        var workArea = SystemParameters.WorkArea;
+        // Leave room to pull the bottom-right grip from compact into the expanded layout.
+        _widget.Left = Math.Max(workArea.Left, workArea.Right - _widget.Width - 120);
+        _widget.Top = Math.Max(workArea.Top, workArea.Bottom - _widget.Height - 120);
     }
 
     private static void OpenSpotify()

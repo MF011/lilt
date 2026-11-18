@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using Lilt.Core;
 using Forms = System.Windows.Forms;
 
 namespace Lilt.App.Platform;
@@ -55,7 +56,7 @@ public sealed class TrayService : IDisposable
         _disconnect.Click += (_, _) => DisconnectRequested?.Invoke();
 
         var opacity = new Forms.ToolStripMenuItem("Glass opacity");
-        foreach (var (value, label) in new[] { (.35, "Light"), (.55, "Soft"), (.72, "Balanced"), (.9, "Dark") })
+        foreach (var (value, label) in new[] { (.35, "Clear"), (WidgetSettings.DefaultGlassOpacity, "Balanced"), (.68, "Tinted"), (.9, "Dark") })
         {
             var captured = value;
             var item = new Forms.ToolStripMenuItem(label);
@@ -85,7 +86,7 @@ public sealed class TrayService : IDisposable
     }
 
     public void SetState(bool isVisible, bool ignoreClicks, bool topmost, bool isConnected,
-        string? status = null, bool glass = true, bool startup = false, double opacity = .72)
+        string? status = null, bool glass = true, bool startup = false, double opacity = WidgetSettings.DefaultGlassOpacity)
     {
         _updating = true;
         try

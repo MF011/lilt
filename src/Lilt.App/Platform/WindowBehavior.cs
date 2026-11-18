@@ -1,8 +1,8 @@
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Screen = System.Windows.Forms.Screen;
 
 namespace Lilt.App.Platform;
@@ -11,58 +11,62 @@ public sealed class WindowBehavior : IDisposable
 {
     private const int VisibilityHotkey = 0x4C11;
     private const int ClickThroughHotkey = 0x4C12;
+    private const int LeftMouseButton = 0x01;
     private readonly Window _window;
+    private readonly DispatcherTimer _gestureTimer;
     private IntPtr _handle;
     private HwndSource? _source;
     private bool _disposed;
     private bool _ignoreClicks;
     private bool _topmost = true;
-    private bool _backdrop = true;
-    private bool _originallyLayered;
-    private bool _moving;
-    private double _opacity = .72;
-    private double _cornerRadius = 20;
+    private Gesture _gesture;
+    private NativeMethods.Rect _startRect;
+    private NativeMethods.Point _startPointer;
+    private int _minimumWidth;
+    private int _minimumHeight;
+    private int _maximumWidth;
+    private int _maximumHeight;
+
+    [Flags]
+    private enum Gesture
+    {
+        None = 0, Move = 1, Left = 2, Top = 4, Right = 8, Bottom = 16,
+        TopLeft = Top | Left, TopRight = Top | Right,
+        BottomLeft = Bottom | Left, BottomRight = Bottom | Right
+    }
 
     public event Action? ToggleVisibilityRequested;
     public event Action? ToggleClickThroughRequested;
-    public event Action<bool>? BackdropChanged;
     public bool VisibilityHotkeyRegistered { get; private set; }
     public bool ClickThroughHotkeyRegistered { get; private set; }
-    public bool BackdropApplied { get; private set; }
+    public bool IsGestureActive => _gesture != Gesture.None;
 
     public WindowBehavior(Window window)
     {
         _window = window;
         window.ShowActivated = false;
         window.ShowInTaskbar = false;
+        _gestureTimer = new DispatcherTimer(DispatcherPriority.Input, window.Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(16)
+        };
+        _gestureTimer.Tick += OnGestureTick;
         window.SourceInitialized += OnSourceInitialized;
-        window.SizeChanged += OnSizeChanged;
-        window.DpiChanged += OnDpiChanged;
+        window.PreviewMouseLeftButtonDown += OnPreviewMouseLeftButtonDown;
+        window.PreviewMouseMove += OnPreviewMouseMove;
+        window.IsVisibleChanged += OnIsVisibleChanged;
         window.Closed += OnClosed;
         if (new WindowInteropHelper(window).Handle != IntPtr.Zero) Initialize();
     }
 
     public void SetClickThrough(bool enabled)
     {
+        if (enabled) EndGesture(constrain: true);
         _ignoreClicks = enabled;
         if (_handle == IntPtr.Zero) return;
         var style = NativeMethods.GetExStyle(_handle).ToInt64();
-        if (enabled)
-        {
-            style |= NativeMethods.WsExTransparent | NativeMethods.WsExLayered;
-            NativeMethods.SetExStyle(_handle, style);
-            NativeMethods.SetLayeredWindowAttributes(_handle, 0, 255, 0x2);
-        }
-        else
-        {
-            style &= ~NativeMethods.WsExTransparent;
-            if (!_originallyLayered) style &= ~NativeMethods.WsExLayered;
-            NativeMethods.SetExStyle(_handle, style);
-        }
-        NativeMethods.SetWindowPos(_handle, IntPtr.Zero, 0, 0, 0, 0,
-            NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoZOrder |
-            NativeMethods.SwpNoActivate | NativeMethods.SwpFrameChanged);
-        ApplyBackdrop();
+        style = enabled ? style | NativeMethods.WsExTransparent : style & ~NativeMethods.WsExTransparent;
+        NativeMethods.SetExStyle(_handle, style);
     }
 
     public void SetTopmost(bool enabled)
@@ -74,37 +78,8 @@ public sealed class WindowBehavior : IDisposable
                 NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate);
     }
 
-    public bool SetBackdrop(bool enabled)
-    {
-        _backdrop = enabled;
-        return ApplyBackdrop();
-    }
-
-    public void SetOpacity(double opacity)
-    {
-        _opacity = Math.Clamp(opacity, .25, .95);
-        ApplyBackdrop();
-    }
-
-    public void UpdateCornerRadius(double radius)
-    {
-        _cornerRadius = Math.Clamp(radius, 0, 64);
-        UpdateRegion();
-    }
-
-    public void TryBeginDrag()
-    {
-        if (!_ignoreClicks) BeginDrag(_window);
-    }
-
-    public static void BeginDrag(Window window)
-    {
-        var handle = new WindowInteropHelper(window).Handle;
-        if (handle == IntPtr.Zero) return;
-        Mouse.Capture(null);
-        NativeMethods.ReleaseCapture();
-        NativeMethods.SendMessage(handle, NativeMethods.WmNcLButtonDown, new IntPtr(NativeMethods.HtCaption), IntPtr.Zero);
-    }
+    public void TryBeginDrag() => BeginGesture(Gesture.Move);
+    public void TryBeginResize() => BeginGesture(Gesture.BottomRight);
 
     public void RestoreToVisibleScreen()
     {
@@ -121,53 +96,34 @@ public sealed class WindowBehavior : IDisposable
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e) => Initialize();
-    private void OnSizeChanged(object sender, SizeChangedEventArgs e) => UpdateRegion();
-    private void OnDpiChanged(object sender, DpiChangedEventArgs e) => UpdateRegion();
     private void OnClosed(object? sender, EventArgs e) => Dispose();
+    private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (!_window.IsVisible) EndGesture(constrain: false);
+    }
 
     private void Initialize()
     {
         if (_disposed || _handle != IntPtr.Zero) return;
         _handle = new WindowInteropHelper(_window).Handle;
         _source = HwndSource.FromHwnd(_handle);
-        _source?.AddHook(WindowProc);
-        if (_source?.CompositionTarget is { } target) target.BackgroundColor = Colors.Transparent;
+        if (_source?.CompositionTarget is not { UsesPerPixelOpacity: true } target)
+            throw new InvalidOperationException("The widget requires a transparent WPF window.");
+        target.BackgroundColor = Colors.Transparent;
+        _source.AddHook(WindowProc);
         var style = NativeMethods.GetExStyle(_handle).ToInt64();
-        _originallyLayered = (style & NativeMethods.WsExLayered) != 0;
         NativeMethods.SetExStyle(_handle,
             (style | NativeMethods.WsExToolWindow | NativeMethods.WsExNoActivate) & ~NativeMethods.WsExAppWindow);
-        var margins = new NativeMethods.Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
-        NativeMethods.DwmExtendFrameIntoClientArea(_handle, ref margins);
         VisibilityHotkeyRegistered = NativeMethods.RegisterHotKey(_handle, VisibilityHotkey,
             NativeMethods.ModControl | NativeMethods.ModAlt | NativeMethods.ModNoRepeat, 0x4C);
         ClickThroughHotkeyRegistered = NativeMethods.RegisterHotKey(_handle, ClickThroughHotkey,
             NativeMethods.ModControl | NativeMethods.ModAlt | NativeMethods.ModShift | NativeMethods.ModNoRepeat, 0x4C);
         SetTopmost(_topmost);
         SetClickThrough(_ignoreClicks);
-        UpdateRegion();
     }
 
     private IntPtr WindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (message == NativeMethods.WmNcCalcSize)
-        {
-            // Keep the entire HWND as client area. WindowStyle=None otherwise leaves
-            // a standard resize border; WM_NCHITTEST below supplies our resize edges.
-            handled = true;
-            return IntPtr.Zero;
-        }
-        if (message == NativeMethods.WmStyleChanging && wParam.ToInt32() == NativeMethods.GwlExStyle &&
-            _ignoreClicks && lParam != IntPtr.Zero)
-        {
-            // HwndTarget strips WS_EX_LAYERED on non-per-pixel WPF windows. In this mode
-            // Windows owns the constant-alpha layer so its hit testing can pass through
-            // to windows in other processes. Leave normal WPF style handling unchanged.
-            var style = Marshal.PtrToStructure<NativeMethods.StyleStruct>(lParam);
-            style.NewStyle |= (uint)(NativeMethods.WsExLayered | NativeMethods.WsExTransparent);
-            Marshal.StructureToPtr(style, lParam, false);
-            handled = true;
-            return IntPtr.Zero;
-        }
         if (message == NativeMethods.WmMouseActivate)
         {
             handled = true;
@@ -180,103 +136,154 @@ public sealed class WindowBehavior : IDisposable
             else return IntPtr.Zero;
             handled = true;
         }
-        else if (message == NativeMethods.WmDwmCompositionChanged) ApplyBackdrop();
-        else if (message == NativeMethods.WmEnterSizeMove)
-        {
-            // Win10 Acrylic can stall interactive window moves. Restore it when the gesture ends.
-            _moving = true;
-            ApplyBackdrop();
-        }
-        else if (message == NativeMethods.WmExitSizeMove)
-        {
-            _moving = false;
-            ApplyBackdrop();
-        }
+        else if (message == NativeMethods.WmCancelMode) EndGesture(constrain: false);
         else if (message == NativeMethods.WmDisplayChange)
             _window.Dispatcher.BeginInvoke(new Action(RestoreToVisibleScreen));
-        else if (message == NativeMethods.WmNcHitTest && !_ignoreClicks && NativeMethods.GetWindowRect(hwnd, out var rect))
-        {
-            var raw = lParam.ToInt64();
-            var x = unchecked((short)(raw & 0xFFFF));
-            var y = unchecked((short)((raw >> 16) & 0xFFFF));
-            var border = Math.Max(5, (int)Math.Round(7 * VisualTreeHelper.GetDpi(_window).DpiScaleX));
-            var left = x < rect.Left + border;
-            var right = x >= rect.Right - border;
-            var top = y < rect.Top + border;
-            var bottom = y >= rect.Bottom - border;
-            var hit = top && left ? NativeMethods.HtTopLeft : top && right ? NativeMethods.HtTopRight :
-                bottom && left ? NativeMethods.HtBottomLeft : bottom && right ? NativeMethods.HtBottomRight :
-                left ? NativeMethods.HtLeft : right ? NativeMethods.HtRight :
-                top ? NativeMethods.HtTop : bottom ? NativeMethods.HtBottom : 0;
-            if (hit != 0)
-            {
-                handled = true;
-                return new IntPtr(hit);
-            }
-        }
         return IntPtr.Zero;
     }
 
-    private bool ApplyBackdrop()
+    private void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (_handle == IntPtr.Zero) return false;
-        var enabled = _backdrop && !_moving && CanUseBackdrop();
-        var accent = new NativeMethods.AccentPolicy
-        {
-            State = enabled ? 4 : 0,
-            Flags = enabled ? 2 : 0,
-            // The WPF surface supplies the main tint; keep the native blur from doubling it.
-            GradientColor = ((uint)Math.Round(_opacity * .25 * 255) << 24) | 0x0018110E
-        };
-        var pointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMethods.AccentPolicy>());
-        try
-        {
-            Marshal.StructureToPtr(accent, pointer, false);
-            var data = new NativeMethods.WindowCompositionAttributeData
-            {
-                Attribute = 19,
-                Data = pointer,
-                Size = Marshal.SizeOf<NativeMethods.AccentPolicy>()
-            };
-            BackdropApplied = NativeMethods.SetWindowCompositionAttribute(_handle, ref data) && enabled;
-        }
-        catch (EntryPointNotFoundException) { BackdropApplied = false; }
-        catch (DllNotFoundException) { BackdropApplied = false; }
-        finally { Marshal.FreeHGlobal(pointer); }
-        BackdropChanged?.Invoke(BackdropApplied);
-        return BackdropApplied;
+        if (_ignoreClicks || _gesture != Gesture.None) return;
+        var edge = ResizeEdgesAt(e.GetPosition(_window));
+        if (edge == Gesture.None) return;
+        BeginGesture(edge);
+        e.Handled = true;
     }
 
-    private static bool CanUseBackdrop()
+    private void OnPreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (SystemParameters.HighContrast || SystemParameters.IsRemoteSession) return false;
-        try
-        {
-            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            return key?.GetValue("EnableTransparency") is not int enabled || enabled != 0;
-        }
-        catch (Exception exception) when (exception is System.Security.SecurityException or UnauthorizedAccessException)
-        {
-            return false;
-        }
+        if (_ignoreClicks || _gesture != Gesture.None) return;
+        _window.Cursor = CursorFor(ResizeEdgesAt(e.GetPosition(_window)));
     }
 
-    private void UpdateRegion()
+    private Gesture ResizeEdgesAt(System.Windows.Point point)
     {
-        if (_handle == IntPtr.Zero || !NativeMethods.GetWindowRect(_handle, out var rect)) return;
-        var radius = (int)Math.Round(_cornerRadius * VisualTreeHelper.GetDpi(_window).DpiScaleX * 2);
-        var region = NativeMethods.CreateRoundRectRgn(0, 0, rect.Right - rect.Left + 1, rect.Bottom - rect.Top + 1, radius, radius);
-        if (region != IntPtr.Zero && NativeMethods.SetWindowRgn(_handle, region, true) == 0)
-            NativeMethods.DeleteObject(region);
+        const double edge = 6;
+        const double corner = 24;
+        var width = _window.ActualWidth;
+        var height = _window.ActualHeight;
+        if (point.X < 0 || point.Y < 0 || point.X > width || point.Y > height) return Gesture.None;
+        var left = point.X <= edge;
+        var right = point.X >= width - edge;
+        var top = point.Y <= edge;
+        var bottom = point.Y >= height - edge;
+        if ((left && point.Y <= corner) || (top && point.X <= corner)) return Gesture.TopLeft;
+        if ((right && point.Y <= corner) || (top && point.X >= width - corner)) return Gesture.TopRight;
+        if ((left && point.Y >= height - corner) || (bottom && point.X <= corner)) return Gesture.BottomLeft;
+        if ((right && point.Y >= height - corner) || (bottom && point.X >= width - corner)) return Gesture.BottomRight;
+        if (left) return Gesture.Left;
+        if (right) return Gesture.Right;
+        if (top) return Gesture.Top;
+        if (bottom) return Gesture.Bottom;
+        return Gesture.None;
     }
+
+    private void BeginGesture(Gesture gesture)
+    {
+        if (_disposed || _ignoreClicks || !_window.IsVisible || _handle == IntPtr.Zero ||
+            NativeMethods.GetAsyncKeyState(LeftMouseButton) >= 0 ||
+            !NativeMethods.GetCursorPos(out var pointer) || !NativeMethods.GetWindowRect(_handle, out var rect)) return;
+        EndGesture(constrain: false);
+        _startPointer = pointer;
+        _startRect = rect;
+        var dpi = VisualTreeHelper.GetDpi(_window);
+        _minimumWidth = Math.Max(1, (int)Math.Ceiling(_window.MinWidth * dpi.DpiScaleX));
+        _minimumHeight = Math.Max(1, (int)Math.Ceiling(_window.MinHeight * dpi.DpiScaleY));
+        var area = Screen.FromRectangle(new System.Drawing.Rectangle(rect.Left, rect.Top,
+            rect.Right - rect.Left, rect.Bottom - rect.Top)).WorkingArea;
+        _maximumWidth = MaximumPixels(_window.MaxWidth, dpi.DpiScaleX, area.Width, _minimumWidth);
+        _maximumHeight = MaximumPixels(_window.MaxHeight, dpi.DpiScaleY, area.Height, _minimumHeight);
+        _gesture = gesture;
+        _window.Cursor = gesture == Gesture.Move ? Cursors.SizeAll : CursorFor(gesture);
+        Mouse.Capture(null);
+        NativeMethods.SetCapture(_handle);
+        _gestureTimer.Start();
+    }
+
+    private static int MaximumPixels(double value, double scale, int available, int minimum)
+    {
+        var maximum = double.IsFinite(value) ? Math.Min(value * scale, available) : available;
+        return Math.Max(minimum, (int)Math.Floor(maximum));
+    }
+
+    private void OnGestureTick(object? sender, EventArgs e)
+    {
+        if (_gesture == Gesture.None) return;
+        if (_disposed || !_window.IsVisible || _ignoreClicks)
+        {
+            EndGesture(constrain: false);
+            return;
+        }
+        if (NativeMethods.GetAsyncKeyState(LeftMouseButton) >= 0)
+        {
+            UpdateGesture();
+            EndGesture(constrain: true);
+            return;
+        }
+        UpdateGesture();
+    }
+
+    private void UpdateGesture()
+    {
+        if (!NativeMethods.GetCursorPos(out var pointer)) return;
+        var dx = pointer.X - _startPointer.X;
+        var dy = pointer.Y - _startPointer.Y;
+        var rect = _startRect;
+        if (_gesture == Gesture.Move)
+        {
+            rect.Left += dx;
+            rect.Right += dx;
+            rect.Top += dy;
+            rect.Bottom += dy;
+        }
+        else
+        {
+            if ((_gesture & Gesture.Left) != 0)
+                rect.Left = Math.Clamp(_startRect.Left + dx, rect.Right - _maximumWidth, rect.Right - _minimumWidth);
+            if ((_gesture & Gesture.Right) != 0)
+                rect.Right = Math.Clamp(_startRect.Right + dx, rect.Left + _minimumWidth, rect.Left + _maximumWidth);
+            if ((_gesture & Gesture.Top) != 0)
+                rect.Top = Math.Clamp(_startRect.Top + dy, rect.Bottom - _maximumHeight, rect.Bottom - _minimumHeight);
+            if ((_gesture & Gesture.Bottom) != 0)
+                rect.Bottom = Math.Clamp(_startRect.Bottom + dy, rect.Top + _minimumHeight, rect.Top + _maximumHeight);
+        }
+        if (NativeMethods.GetWindowRect(_handle, out var current) &&
+            current.Left == rect.Left && current.Top == rect.Top && current.Right == rect.Right && current.Bottom == rect.Bottom) return;
+        NativeMethods.SetWindowPos(_handle, IntPtr.Zero, rect.Left, rect.Top,
+            rect.Right - rect.Left, rect.Bottom - rect.Top,
+            NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate);
+    }
+
+    private void EndGesture(bool constrain)
+    {
+        if (_gesture == Gesture.None) return;
+        _gestureTimer.Stop();
+        _gesture = Gesture.None;
+        if (NativeMethods.GetCapture() == _handle) NativeMethods.ReleaseCapture();
+        _window.Cursor = Cursors.Arrow;
+        if (constrain && _window.IsVisible && !_disposed) RestoreToVisibleScreen();
+    }
+
+    private static Cursor CursorFor(Gesture edges) => edges switch
+    {
+        Gesture.TopLeft or Gesture.BottomRight => Cursors.SizeNWSE,
+        Gesture.TopRight or Gesture.BottomLeft => Cursors.SizeNESW,
+        Gesture.Left or Gesture.Right => Cursors.SizeWE,
+        Gesture.Top or Gesture.Bottom => Cursors.SizeNS,
+        _ => Cursors.Arrow
+    };
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        EndGesture(constrain: false);
+        _gestureTimer.Tick -= OnGestureTick;
         _window.SourceInitialized -= OnSourceInitialized;
-        _window.SizeChanged -= OnSizeChanged;
-        _window.DpiChanged -= OnDpiChanged;
+        _window.PreviewMouseLeftButtonDown -= OnPreviewMouseLeftButtonDown;
+        _window.PreviewMouseMove -= OnPreviewMouseMove;
+        _window.IsVisibleChanged -= OnIsVisibleChanged;
         _window.Closed -= OnClosed;
         if (_handle != IntPtr.Zero)
         {
