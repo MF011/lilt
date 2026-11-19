@@ -302,7 +302,7 @@ public static class NativeSmokeChecks
     private static async Task CheckDesktopGlassAsync(MainWindow window, IntPtr handle, WidgetViewModel vm, WindowBehavior behavior,
         string output, List<string> report)
     {
-        var panel = new Border { Background = Brushes.Black };
+        var panel = new Border { Background = Brushes.MidnightBlue };
         var backdrop = new Window
         {
             WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize,
@@ -331,17 +331,15 @@ public static class NativeSmokeChecks
             vm.OpaqueBackground = false;
             var visual = SaveVisual((FrameworkElement)window.Content, Path.Combine(output, "glass-alpha.png"));
             report.Add($"Rendered glass alpha at the desktop probe: {AlphaAt(visual, .5, .1)}/255.");
-            await Task.Delay(200);
-            using var dark = ReadDesktop(rect);
-            panel.Background = Brushes.White;
-            await Task.Delay(200);
-            using var light = ReadDesktop(rect);
+            using var light = await ReadFixtureAsync(panel, rect, Colors.White);
+            using var dark = await ReadFixtureAsync(panel, rect, Colors.Black);
             light.Save(Path.Combine(output, "glass-over-white.png"), System.Drawing.Imaging.ImageFormat.Png);
             dark.Save(Path.Combine(output, "glass-over-black.png"), System.Drawing.Imaging.ImageFormat.Png);
             var cornerDifference = light.GetPixel(0, 0).R - dark.GetPixel(0, 0).R;
             Require(cornerDifference > 220, $"The test background was not visible at the transparent corner (difference {cornerDifference}).");
             var difference = light.GetPixel(x, y).R - dark.GetPixel(x, y).R;
             Require(difference is > 20 and < 245, $"The desktop did not blend through the glass body (difference {difference}).");
+            using var whiteFixture = await ReadFixtureAsync(panel, rect, Colors.White);
             vm.OpaqueBackground = true;
             await Task.Delay(120);
             using var solid = ReadDesktop(rect);
@@ -355,6 +353,25 @@ public static class NativeSmokeChecks
             vm.OpaqueBackground = originalOpaque;
             backdrop.Close();
         }
+    }
+
+    private static async Task<System.Drawing.Bitmap> ReadFixtureAsync(Border panel, NativeMethods.Rect rect, Color color)
+    {
+        panel.Background = new SolidColorBrush(color);
+        panel.UpdateLayout();
+        await panel.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        for (var attempt = 0; attempt < 15; attempt++)
+        {
+            await Task.Delay(80);
+            var image = ReadDesktop(rect);
+            // The corner lies outside the rounded card, so it is a reference pixel
+            // for the backing window rather than a test of Lilt's tint.
+            var pixel = image.GetPixel(0, 0);
+            if (Math.Abs(pixel.R - color.R) <= 8 && Math.Abs(pixel.G - color.G) <= 8 && Math.Abs(pixel.B - color.B) <= 8)
+                return image;
+            image.Dispose();
+        }
+        throw new InvalidOperationException($"The controlled background did not paint {color} at the open corner.");
     }
 
     private static async Task CheckDesktopRefractionAsync(MainWindow window, NativeMethods.Rect rect, WidgetViewModel vm,
