@@ -70,7 +70,7 @@ internal sealed class WindowLensCapture : IDisposable
                     // A viewport is not honored by every WM_PRINT implementation.
                     // Compare it with a bounded full-window rendering before using it.
                     if (windowWidth <= 0 || windowHeight <= 0 || windowWidth > 4096 || windowHeight > 4096 ||
-                        (long)windowWidth * windowHeight > 4 * 1024 * 1024 ||
+                        (long)windowWidth * windowHeight > 9 * 1024 * 1024 ||
                         !_full.Ensure(screen, windowWidth, windowHeight) || !Print(window, _full, 0, 0) ||
                         !ReadFrame(_full, offsetX, offsetY, width, height, _comparison, out var fullInformative)) return false;
                     _cropProven = cropValid && fullInformative && (offsetX != 0 || offsetY != 0) &&

@@ -389,6 +389,7 @@ public static class NativeSmokeChecks
 
         Require(lens.IsAvailable == true && vm.RefractedBackground is not null,
             "Refraction could not obtain a desktop sample without the widget's own layer.");
+        report.Add($"Desktop refraction source: {lens.CaptureSource}.");
         using var refracted = ReadDesktop(rect);
         refracted.Save(Path.Combine(output, "refraction-on.png"), System.Drawing.Imaging.ImageFormat.Png);
         var firstFrame = EncodePng(vm.RefractedBackground!);
@@ -401,9 +402,50 @@ public static class NativeSmokeChecks
             if (vm.RefractedBackground is { } frame) changed = !EncodePng(frame).AsSpan().SequenceEqual(firstFrame);
         }
         Require(changed, "Refraction did not update when the window behind the card changed.");
+        if (lens.CaptureSource == "Display duplication")
+            await CheckOverlappingRefractionAsync(window, rect, vm, lens, output, report);
         lens.SetEnabled(false);
         Require(vm.RefractedBackground is null, "Disabling refraction did not clear the lens frame.");
         report.Add("Desktop refraction: the capture excluded the card, the lens rendered, and changing the backdrop updated the frame.");
+    }
+
+    private static async Task CheckOverlappingRefractionAsync(MainWindow window, NativeMethods.Rect rect, WidgetViewModel vm,
+        GlassLens lens, string output, List<string> report)
+    {
+        var width = rect.Right - rect.Left;
+        var height = rect.Bottom - rect.Top;
+        var foreground = new Window
+        {
+            WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, Width = 180, Height = 180,
+            ShowActivated = false, ShowInTaskbar = false, Topmost = true,
+            Content = new Border { Background = new SolidColorBrush(Color.FromRgb(238, 36, 116)) }
+        };
+        try
+        {
+            foreground.Show();
+            var overlay = new WindowInteropHelper(foreground).Handle;
+            var card = new WindowInteropHelper(window).Handle;
+            Require(NativeMethods.SetWindowPos(overlay, new IntPtr(-1), rect.Left + width / 2, rect.Top - 6,
+                width / 2 + 20, height + 12, NativeMethods.SwpNoActivate), "Could not place the overlapping test window.");
+            Require(NativeMethods.SetWindowPos(card, new IntPtr(-1), 0, 0, 0, 0,
+                NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate), "Could not raise the card above the test windows.");
+            var pixel = new byte[4];
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                await Task.Delay(100);
+                if (lens.CaptureSource != "Display duplication" || vm.RefractedBackground is not { } image) continue;
+                image.CopyPixels(new Int32Rect(image.PixelWidth * 3 / 4, image.PixelHeight / 2, 1, 1), pixel, 4, 0);
+                if (pixel[2] < 210 || pixel[1] > 65 || pixel[0] < 90) continue;
+                image.CopyPixels(new Int32Rect(image.PixelWidth / 4, image.PixelHeight / 2, 1, 1), pixel, 4, 0);
+                if (pixel[2] >= 210 && pixel[1] <= 65 && pixel[0] >= 90) continue;
+                using var desktop = ReadDesktop(rect);
+                desktop.Save(Path.Combine(output, "refraction-overlap.png"), System.Drawing.Imaging.ImageFormat.Png);
+                report.Add("Desktop refraction: display capture resolved the two overlapping windows under the card.");
+                return;
+            }
+            throw new InvalidOperationException("Display refraction did not resolve two overlapping windows.");
+        }
+        finally { foreground.Close(); }
     }
 
     private static DrawingBrush CreateGridBrush(Color color)

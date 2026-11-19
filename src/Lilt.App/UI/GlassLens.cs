@@ -17,6 +17,8 @@ internal sealed class GlassLens : IDisposable
     private DesktopLensCapture? _capture;
     private DesktopLensCapture? _probe;
     private WindowLensCapture? _windowCapture;
+    private DuplicateLensCapture? _duplicate;
+    private IntPtr _excludedWindow;
     private Task<WindowFrame>? _pending;
     private LensRefraction? _renderer;
     private WriteableBitmap? _bitmap;
@@ -31,6 +33,7 @@ internal sealed class GlassLens : IDisposable
     private bool _disposed;
 
     public bool? IsAvailable { get; private set; }
+    internal string? CaptureSource { get; private set; }
     public event Action? AvailabilityChanged;
 
     public GlassLens(MainWindow window, WidgetViewModel viewModel, WindowBehavior behavior)
@@ -104,10 +107,16 @@ internal sealed class GlassLens : IDisposable
         var padding = (int)Math.Ceiling(24 * dpi);
         if (_desktopExcludesWidget && TryCaptureDesktop(rect, padding, marker, out var pixels, out var usedPadding))
         {
-            Paint(pixels, new CaptureSize(width, height, usedPadding, dpi));
+            Paint(pixels, new CaptureSize(width, height, usedPadding, dpi), "Desktop tile");
             return;
         }
-        RenderWindowBehind(new WindowRequest(handle, rect, new CaptureSize(width, height, padding, dpi), _requestGeneration), now);
+        if (_excludedWindow == IntPtr.Zero && _duplicate is null)
+        {
+            // A failed exclusion attempt is sticky for this enabled session.
+            _excludedWindow = DuplicateLensCapture.MarkExcluded(handle, true) ? handle : new IntPtr(-1);
+        }
+        if (_excludedWindow == handle) _duplicate ??= new DuplicateLensCapture();
+        RenderWindowBehind(new WindowRequest(handle, rect, new CaptureSize(width, height, padding, dpi), marker, _requestGeneration), now);
     }
 
     private bool TryCaptureDesktop(NativeMethods.Rect rect, int padding, Marker marker, out byte[] pixels, out int usedPadding)
@@ -146,7 +155,7 @@ internal sealed class GlassLens : IDisposable
             if (completed.Request == request)
             {
                 if (completed.Pixels.Length > 0)
-                    Paint(completed.Pixels, request.Size with { Padding = completed.Padding });
+                    Paint(completed.Pixels, request.Size with { Padding = completed.Padding }, completed.Source!);
                 else
                 {
                     _viewModel.RefractedBackground = null;
@@ -158,25 +167,46 @@ internal sealed class GlassLens : IDisposable
 
         if (now < _retryWindowAt) return;
         var capture = _windowCapture ??= new WindowLensCapture();
+        var duplicate = _duplicate;
         // Responding to a print request runs on the source app's thread. Keep it
         // off Lilt's dispatcher, with at most one in-flight capture.
         _windowRequestedAt = now;
-        _pending = Task.Run(() => CaptureWindow(capture, request));
+        _pending = Task.Run(() => CaptureWindow(duplicate, capture, request));
     }
 
-    private static WindowFrame CaptureWindow(WindowLensCapture capture, WindowRequest request)
+    private static WindowFrame CaptureWindow(DuplicateLensCapture? duplicate, WindowLensCapture capture, WindowRequest request)
     {
         var size = request.Size;
         var rect = request.Rect;
+        if (duplicate is not null && duplicate.TryCapture(rect.Left, rect.Top, size.Width, size.Height, out var tile) &&
+            !MatchesMarker(tile, size.Width * 4, size.Height, request.Marker.X - rect.Left, request.Marker.Y - rect.Top, request.Marker.Color) &&
+            HasVisiblePixels(tile, size.Width, size.Height))
+            return new WindowFrame(request, 0, tile, "Display duplication");
+
         var padding = size.Padding;
         if (capture.TryCapture(request.Handle, rect.Left - padding, rect.Top - padding,
             size.Width + padding * 2, size.Height + padding * 2, out var pixels))
-            return new WindowFrame(request, padding, pixels);
-        return new WindowFrame(request, 0, capture.TryCapture(request.Handle, rect.Left, rect.Top,
-            size.Width, size.Height, out pixels) ? pixels : []);
+            return new WindowFrame(request, padding, pixels, "Window sample");
+        return capture.TryCapture(request.Handle, rect.Left, rect.Top, size.Width, size.Height, out pixels)
+            ? new WindowFrame(request, 0, pixels, "Window sample")
+            : new WindowFrame(request, 0, [], null);
     }
 
-    private void Paint(byte[] pixels, CaptureSize size)
+    private static bool HasVisiblePixels(byte[] pixels, int width, int height)
+    {
+        // Some drivers mask an excluded surface rather than revealing the backdrop.
+        // Reject a black tile, allowing the per-window fallback to try instead.
+        var pixelsFound = 0;
+        for (var y = height / 4; y < height * 3 / 4; y += 4)
+        for (var x = width / 4; x < width * 3 / 4; x += 4)
+        {
+            var i = (y * width + x) * 4;
+            if ((pixels[i] | pixels[i + 1] | pixels[i + 2]) > 8 && ++pixelsFound >= 6) return true;
+        }
+        return false;
+    }
+
+    private void Paint(byte[] pixels, CaptureSize size, string source)
     {
         if (_renderer is null || size != _size)
         {
@@ -190,6 +220,7 @@ internal sealed class GlassLens : IDisposable
         _renderer.Render(pixels, _renderer.SourceWidth * 4, _output!, outputStride, soften: true);
         _bitmap!.WritePixels(new Int32Rect(0, 0, _bitmap.PixelWidth, _bitmap.PixelHeight), _output!, outputStride, 0);
         _viewModel.RefractedBackground = _bitmap;
+        CaptureSource = source;
         SetAvailability(true);
     }
 
@@ -246,18 +277,28 @@ internal sealed class GlassLens : IDisposable
     private void ReleaseFrames()
     {
         _requestGeneration++;
+        CaptureSource = null;
         _viewModel.RefractedBackground = null;
         _capture?.Dispose();
         _probe?.Dispose();
         _capture = null;
         _probe = null;
-        if (_windowCapture is { } capture)
+        if (_excludedWindow != IntPtr.Zero && _excludedWindow != new IntPtr(-1))
+            DuplicateLensCapture.MarkExcluded(_excludedWindow, false);
+        _excludedWindow = IntPtr.Zero;
+        var duplicate = _duplicate;
+        var capture = _windowCapture;
+        if (duplicate is not null || capture is not null)
         {
             if (_pending is { IsCompleted: false } task)
-                _ = task.ContinueWith(_ => capture.Dispose(), TaskScheduler.Default);
+                _ = task.ContinueWith(_ => { capture?.Dispose(); duplicate?.Dispose(); }, TaskScheduler.Default);
             else
-                capture.Dispose();
+            {
+                capture?.Dispose();
+                duplicate?.Dispose();
+            }
             _windowCapture = null;
+            _duplicate = null;
         }
         _renderer = null;
         _output = null;
@@ -275,7 +316,7 @@ internal sealed class GlassLens : IDisposable
     }
 
     private readonly record struct CaptureSize(int Width, int Height, int Padding, double Dpi);
-    private readonly record struct WindowRequest(IntPtr Handle, NativeMethods.Rect Rect, CaptureSize Size, int Generation);
-    private readonly record struct WindowFrame(WindowRequest Request, int Padding, byte[] Pixels);
+    private readonly record struct WindowRequest(IntPtr Handle, NativeMethods.Rect Rect, CaptureSize Size, Marker Marker, int Generation);
+    private readonly record struct WindowFrame(WindowRequest Request, int Padding, byte[] Pixels, string? Source);
     private readonly record struct Marker(int X, int Y, Color Color);
 }
