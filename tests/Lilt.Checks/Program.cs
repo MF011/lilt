@@ -46,6 +46,14 @@ Check("Settings round trip keeps user preferences", () =>
 });
 
 checks.AddRange(LensChecks.Cases());
+Check("Refraction adjustments round-trip through widget settings", () =>
+{
+    var style = new RefractionSettings { Bend = 12, Softness = 1.5, ColorSplit = 0, ReducedResolution = true };
+    var settings = new WidgetSettings { RefractionStyle = style };
+    var loaded = JsonSerializer.Deserialize<WidgetSettings>(JsonSerializer.Serialize(settings))!.Validated();
+    Equal(style, loaded.RefractionStyle);
+    Equal(new RefractionSettings(), JsonSerializer.Deserialize<WidgetSettings>("{}")!.Validated().RefractionStyle);
+});
 
 var failed = 0;
 foreach (var check in checks)

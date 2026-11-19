@@ -28,6 +28,7 @@ public sealed class TrayService : IDisposable
     public event Action<bool>? TopmostChanged;
     public event Action<bool>? GlassChanged;
     public event Action<bool>? RefractionChanged;
+    public event Action? RefractionSettingsRequested;
     public event Action<bool>? StartupChanged;
     public event Action<double>? OpacityChanged;
     public event Action? SettingsRequested;
@@ -75,6 +76,7 @@ public sealed class TrayService : IDisposable
         _menu.Items.Add(_topmost);
         _menu.Items.Add(_glass);
         _menu.Items.Add(_refraction);
+        _menu.Items.Add(MenuItem("Refraction settings…", () => RefractionSettingsRequested?.Invoke()));
         _menu.Items.Add(opacity);
         _menu.Items.Add(new Forms.ToolStripSeparator());
         _menu.Items.Add(MenuItem("Settings…", () => SettingsRequested?.Invoke()));

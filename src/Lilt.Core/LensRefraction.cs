@@ -8,13 +8,12 @@ namespace Lilt.Core;
 /// </summary>
 public sealed class LensRefraction
 {
-    private const int MaximumOutputWidth = 800;
-    private const int MaximumOutputHeight = 400;
+    public const int MaximumOutputPixels = 600_000;
     private readonly SamplingMap[] _map;
 
     public LensRefraction(int cardPixelWidth, int cardPixelHeight, int paddingPixels = 24,
-        double pixelsPerDip = 1, double resolutionScale = .5, double cornerRadiusDip = 22,
-        double bevelWidthDip = 18)
+        double pixelsPerDip = 1, double resolutionScale = 1, double cornerRadiusDip = 22,
+        double bevelWidthDip = 18, RefractionSettings? settings = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(cardPixelWidth, 2);
         ArgumentOutOfRangeException.ThrowIfLessThan(cardPixelHeight, 2);
@@ -36,12 +35,13 @@ public sealed class LensRefraction
         PixelsPerDip = pixelsPerDip;
         SourceWidth = cardPixelWidth + paddingPixels * 2;
         SourceHeight = cardPixelHeight + paddingPixels * 2;
-        var scale = Math.Min(resolutionScale, Math.Min(MaximumOutputWidth / (double)cardPixelWidth,
-            MaximumOutputHeight / (double)cardPixelHeight));
-        OutputWidth = Math.Max(2, (int)Math.Round(cardPixelWidth * scale));
-        OutputHeight = Math.Max(2, (int)Math.Round(cardPixelHeight * scale));
+        Settings = (settings ?? new()).Validated();
+        if (Settings.ReducedResolution) resolutionScale = Math.Min(resolutionScale, .5);
+        var scale = Math.Min(resolutionScale, Math.Sqrt(MaximumOutputPixels / ((double)cardPixelWidth * cardPixelHeight)));
+        OutputWidth = Math.Max(2, (int)Math.Floor(cardPixelWidth * scale));
+        OutputHeight = Math.Max(2, (int)Math.Floor(cardPixelHeight * scale));
         _map = new SamplingMap[OutputWidth * OutputHeight];
-        BuildMap(cornerRadiusDip, bevelWidthDip);
+        BuildMap(cornerRadiusDip, Math.Max(bevelWidthDip, Settings.Bend * 2));
     }
 
     public int CardPixelWidth { get; }
@@ -52,6 +52,7 @@ public sealed class LensRefraction
     public int SourceHeight { get; }
     public int OutputWidth { get; }
     public int OutputHeight { get; }
+    public RefractionSettings Settings { get; }
 
     /// <summary>
     /// Reads top-down BGR24 or BGRA32 pixels and writes opaque, top-down BGRA32.
@@ -60,7 +61,7 @@ public sealed class LensRefraction
     /// not overlap. Softening adds two light tangential taps to the bilinear map.
     /// </summary>
     public void Render(ReadOnlySpan<byte> source, int sourceStride, Span<byte> destination,
-        int destinationStride, int sourceBytesPerPixel = 4, bool soften = false)
+        int destinationStride, int sourceBytesPerPixel = 4, int offsetX = 0, int offsetY = 0)
     {
         if (sourceBytesPerPixel is not (3 or 4)) throw new ArgumentOutOfRangeException(nameof(sourceBytesPerPixel));
         if (sourceStride < SourceWidth * sourceBytesPerPixel) throw new ArgumentOutOfRangeException(nameof(sourceStride));
@@ -70,6 +71,12 @@ public sealed class LensRefraction
         if ((long)(OutputHeight - 1) * destinationStride + OutputWidth * 4 > destination.Length)
             throw new ArgumentException("The destination is smaller than the output image.", nameof(destination));
         if (source.Overlaps(destination)) throw new ArgumentException("Source and destination must not overlap.", nameof(destination));
+        if (offsetX < -PaddingPixels || offsetX > PaddingPixels || offsetY < -PaddingPixels || offsetY > PaddingPixels)
+            throw new ArgumentOutOfRangeException(nameof(offsetX), "The frame offset must fit in the capture padding.");
+
+        var soften = Settings.Softness > 0;
+        var sourceLimitX = SourceWidth - 2;
+        var sourceLimitY = SourceHeight - 2;
 
         for (var y = 0; y < OutputHeight; y++)
         {
@@ -78,17 +85,17 @@ public sealed class LensRefraction
             for (var x = 0; x < OutputWidth; x++)
             {
                 ref readonly var sample = ref _map[mapOffset + x];
-                var blue = ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.Blue, 0);
-                var green = ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.Green, 1);
-                var red = ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.Red, 2);
+                var blue = ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.Blue, 0, offsetX, offsetY, sourceLimitX, sourceLimitY);
+                var green = ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.Green, 1, offsetX, offsetY, sourceLimitX, sourceLimitY);
+                var red = ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.Red, 2, offsetX, offsetY, sourceLimitX, sourceLimitY);
                 if (soften)
                 {
-                    blue = (blue * 6 + ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.SoftA, 0)
-                        + ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.SoftB, 0) + 4) >> 3;
-                    green = (green * 6 + ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.SoftA, 1)
-                        + ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.SoftB, 1) + 4) >> 3;
-                    red = (red * 6 + ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.SoftA, 2)
-                        + ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.SoftB, 2) + 4) >> 3;
+                    blue = (blue * 4 + 2 * (ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.SoftA, 0, offsetX, offsetY, sourceLimitX, sourceLimitY)
+                        + ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.SoftB, 0, offsetX, offsetY, sourceLimitX, sourceLimitY)) + 4) >> 3;
+                    green = (green * 4 + 2 * (ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.SoftA, 1, offsetX, offsetY, sourceLimitX, sourceLimitY)
+                        + ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.SoftB, 1, offsetX, offsetY, sourceLimitX, sourceLimitY)) + 4) >> 3;
+                    red = (red * 4 + 2 * (ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.SoftA, 2, offsetX, offsetY, sourceLimitX, sourceLimitY)
+                        + ReadChannel(source, sourceStride, sourceBytesPerPixel, sample.SoftB, 2, offsetX, offsetY, sourceLimitX, sourceLimitY)) + 4) >> 3;
                 }
                 var offset = x * 4;
                 row[offset] = (byte)blue;
@@ -105,8 +112,7 @@ public sealed class LensRefraction
         var halfHeight = CardPixelHeight * .5;
         var radius = Math.Min(cornerRadiusDip * PixelsPerDip, Math.Min(halfWidth, halfHeight));
         var bevel = Math.Min(bevelWidthDip * PixelsPerDip, Math.Min(halfWidth, halfHeight));
-        var bend = Math.Min(7 * PixelsPerDip, bevel * .42);
-        const double magnification = 1.008;
+        var bend = Math.Min(Settings.Bend * PixelsPerDip, bevel * .5);
 
         for (var y = 0; y < OutputHeight; y++)
         for (var x = 0; x < OutputWidth; x++)
@@ -133,10 +139,10 @@ public sealed class LensRefraction
             // A rounded bevel, rather than a whole-card radial bulge. It peaks
             // one third of the way in, then joins the quiet interior smoothly.
             var profile = 6.75 * t * (1 - t) * (1 - t);
-            var sampleX = PaddingPixels + halfWidth - .5 + px / magnification - nx * bend * profile;
-            var sampleY = PaddingPixels + halfHeight - .5 + py / magnification - ny * bend * profile;
-            var chroma = .55 * profile; // R/B separation stays below 1.1 physical pixels.
-            var softRadius = .65;
+            var sampleX = PaddingPixels + halfWidth - .5 + px - nx * bend * profile;
+            var sampleY = PaddingPixels + halfHeight - .5 + py - ny * bend * profile;
+            var chroma = Settings.ColorSplit * PixelsPerDip * profile;
+            var softRadius = Settings.Softness * PixelsPerDip;
             _map[y * OutputWidth + x] = new SamplingMap(
                 SampleAt(sampleX + nx * chroma, sampleY + ny * chroma),
                 SampleAt(sampleX, sampleY),
@@ -148,22 +154,29 @@ public sealed class LensRefraction
 
     private SamplePoint SampleAt(double x, double y)
     {
-        x = Math.Clamp(x, 0, SourceWidth - 1.000001);
-        y = Math.Clamp(y, 0, SourceHeight - 1.000001);
+        var maxX = SourceWidth - 1;
+        var maxY = SourceHeight - 1;
+        x = Math.Clamp(x, 0, maxX);
+        y = Math.Clamp(y, 0, maxY);
         var left = (int)x;
         var top = (int)y;
-        return new SamplePoint((ushort)left, (ushort)top,
-            (byte)Math.Clamp((int)((x - left) * 256), 0, 255),
-            (byte)Math.Clamp((int)((y - top) * 256), 0, 255));
+        return new SamplePoint((ushort)left, (ushort)top, (byte)((x - left) * 256), (byte)((y - top) * 256));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ReadChannel(ReadOnlySpan<byte> source, int stride, int bytesPerPixel, SamplePoint point, int channel)
+    private static int ReadChannel(ReadOnlySpan<byte> source, int stride, int bytesPerPixel, SamplePoint point, int channel,
+        int offsetX, int offsetY, int limitX, int limitY)
     {
-        var offset = point.Y * stride + point.X * bytesPerPixel + channel;
-        var top = source[offset] * (256 - point.FractionX) + source[offset + bytesPerPixel] * point.FractionX;
-        var bottom = source[offset + stride] * (256 - point.FractionX) + source[offset + stride + bytesPerPixel] * point.FractionX;
-        return (top * (256 - point.FractionY) + bottom * point.FractionY + 32768) >> 16;
+        var x = Math.Clamp(point.X + offsetX, 0, limitX + 1);
+        var y = Math.Clamp(point.Y + offsetY, 0, limitY + 1);
+        var offset = y * stride + x * bytesPerPixel + channel;
+        var fractionX = x > limitX || point.X + offsetX < 0 ? 0 : point.FractionX;
+        var fractionY = y > limitY || point.Y + offsetY < 0 ? 0 : point.FractionY;
+        if (fractionX == 0 && fractionY == 0) return source[offset];
+        var top = fractionX == 0 ? source[offset] * 256 : source[offset] * (256 - fractionX) + source[offset + bytesPerPixel] * fractionX;
+        if (fractionY == 0) return (top + 128) >> 8;
+        var bottom = fractionX == 0 ? source[offset + stride] * 256 : source[offset + stride] * (256 - fractionX) + source[offset + stride + bytesPerPixel] * fractionX;
+        return (top * (256 - fractionY) + bottom * fractionY + 32768) >> 16;
     }
 
     private readonly record struct SamplePoint(ushort X, ushort Y, byte FractionX, byte FractionY);

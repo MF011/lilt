@@ -40,6 +40,7 @@ public sealed class WindowBehavior : IDisposable
     public bool VisibilityHotkeyRegistered { get; private set; }
     public bool ClickThroughHotkeyRegistered { get; private set; }
     public bool IsGestureActive => _gesture != Gesture.None;
+    internal bool IsResizing => _gesture != Gesture.None && _gesture != Gesture.Move;
 
     public WindowBehavior(Window window)
     {

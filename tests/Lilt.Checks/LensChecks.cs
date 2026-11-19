@@ -12,16 +12,19 @@ public static class LensChecks
         yield return ("BGR captures and padded output strides remain valid", PaddedStrides);
         yield return ("Refraction limits output work while keeping the capture geometry", OutputLimit);
         yield return ("Refraction rejects incomplete captures before reading pixels", InvalidBuffers);
+        yield return ("A sharp lens preserves native pixels outside the bevel", NativeDetail);
+        yield return ("A moving lens reads the new position inside a padded frame", MovingSample);
+        yield return ("The bend setting changes the edge displacement", BendSetting);
     }
 
     private static void ConstantField()
     {
-        var lens = new LensRefraction(192, 112);
+        var lens = new LensRefraction(192, 112, settings: new RefractionSettings { Softness = 2 });
         var source = new byte[lens.SourceWidth * lens.SourceHeight * 4];
         for (var i = 0; i < source.Length; i += 4)
         { source[i] = 27; source[i + 1] = 108; source[i + 2] = 219; source[i + 3] = 0; }
         var output = new byte[lens.OutputWidth * lens.OutputHeight * 4];
-        lens.Render(source, lens.SourceWidth * 4, output, lens.OutputWidth * 4, soften: true);
+        lens.Render(source, lens.SourceWidth * 4, output, lens.OutputWidth * 4);
         for (var i = 0; i < output.Length; i += 4)
             Require(output[i] == 27 && output[i + 1] == 108 && output[i + 2] == 219 && output[i + 3] == 255,
                 "A constant scene changed colour or retained source alpha.");
@@ -68,10 +71,10 @@ public static class LensChecks
 
     private static void ZeroPadding()
     {
-        var lens = new LensRefraction(31, 17, 0, resolutionScale: 1);
+        var lens = new LensRefraction(31, 17, 0, settings: new RefractionSettings { Softness = 3 });
         var source = Coordinates(lens, 4, lens.SourceWidth * 4);
         var output = new byte[lens.OutputWidth * lens.OutputHeight * 4];
-        lens.Render(source, lens.SourceWidth * 4, output, lens.OutputWidth * 4, soften: true);
+        lens.Render(source, lens.SourceWidth * 4, output, lens.OutputWidth * 4);
         Require(output.Where((_, index) => index % 4 == 3).All(value => value == 255),
             "An edge-clamped frame contains unpainted pixels.");
     }
@@ -95,10 +98,44 @@ public static class LensChecks
     private static void OutputLimit()
     {
         var lens = new LensRefraction(1600, 1000, 24, 2, 1);
-        Require(lens.OutputWidth <= 800 && lens.OutputHeight <= 400, "Output exceeded the CPU frame budget.");
+        Require(lens.OutputWidth * lens.OutputHeight <= LensRefraction.MaximumOutputPixels, "Output exceeded the CPU frame budget.");
         Require(lens.SourceWidth == 1648 && lens.SourceHeight == 1048, "The padded physical capture was resized unexpectedly.");
         Require(Math.Abs(lens.OutputWidth / (double)lens.OutputHeight - 1.6) < .01,
             "Limiting output changed the card aspect ratio.");
+    }
+
+    private static void NativeDetail()
+    {
+        var lens = new LensRefraction(192, 112, 0);
+        Require(lens.OutputWidth == 192 && lens.OutputHeight == 112, "A normal card was downsampled.");
+        var stride = lens.SourceWidth * 4;
+        var capture = Coordinates(lens, 4, stride);
+        // One-pixel alternating lines reveal downsampling or an unwanted center zoom.
+        for (var i = 0; i < capture.Length; i += 4)
+            capture[i] = capture[i + 1] = capture[i + 2] = (i / 4 % 2 == 0) ? (byte)0 : (byte)255;
+        var output = new byte[capture.Length];
+        lens.Render(capture, stride, output, stride);
+        var offset = 56 * stride + 50 * 4;
+        Require(capture.AsSpan(offset, 90 * 4).SequenceEqual(output.AsSpan(offset, 90 * 4)), "The centre lost pixel detail.");
+    }
+
+    private static void MovingSample()
+    {
+        var lens = new LensRefraction(160, 96, 12);
+        var stride = lens.OutputWidth * 4;
+        var capture = Coordinates(lens, 4, lens.SourceWidth * 4);
+        var output = new byte[lens.OutputHeight * stride];
+        lens.Render(capture, lens.SourceWidth * 4, output, stride, offsetX: 10, offsetY: -6);
+        var index = 48 * stride + 80 * 4;
+        Require(output[index] == 102 && output[index + 1] == 54, "The lens used the old card position.");
+    }
+
+    private static void BendSetting()
+    {
+        var clear = new LensRefraction(192, 112, settings: new RefractionSettings { Bend = 0, ColorSplit = 0 });
+        var strong = new LensRefraction(192, 112, settings: new RefractionSettings { Bend = 15, ColorSplit = 0 });
+        var index = (10 * clear.OutputWidth + 96) * 4 + 1;
+        Require(RenderCoordinates(strong)[index] - RenderCoordinates(clear)[index] >= 10, "Higher bend did not increase the edge displacement.");
     }
 
     private static void InvalidBuffers()

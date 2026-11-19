@@ -21,6 +21,7 @@ internal sealed class DuplicateLensCapture : IDisposable
     private ID3D11Device? _device;
     private ID3D11DeviceContext? _context;
     private ID3D11Texture2D? _tile;
+    private ID3D11Texture2D? _desktopFrame;
     private RawRect _display;
     private byte[] _pixels = [];
     private (int X, int Y, int Width, int Height) _lastTile;
@@ -41,25 +42,40 @@ internal sealed class DuplicateLensCapture : IDisposable
         finally { Marshal.FreeHGlobal(value); }
     }
 
-    internal bool TryCapture(int x, int y, int width, int height, out byte[] pixels)
+    internal bool TryCapture(int x, int y, int width, int height, ref int padding, out byte[] pixels)
     {
         pixels = [];
-        if (width < 2 || height < 2 || width > DesktopLensCapture.MaximumDimension || height > DesktopLensCapture.MaximumDimension ||
-            (long)width * height > DesktopLensCapture.MaximumPixels) return false;
+        if (!ValidTile(width, height)) return false;
 
         try
         {
             if (!EnsureOutput(x, y, width, height)) return false;
-            var result = _output!.AcquireNextFrame(8, out _, out var resource);
+            if (!ValidTile(width + 2 * padding, height + 2 * padding) ||
+                !Contains(_display, x - padding, y - padding, width + 2 * padding, height + 2 * padding)) padding = 0;
+            x -= padding;
+            y -= padding;
+            width += 2 * padding;
+            height += 2 * padding;
+            var result = _output!.AcquireNextFrame(0, out var frameInfo, out var resource);
             if (result.Failure)
             {
                 resource?.Dispose();
-                if (result.Code == WaitTimeout && (x, y, width, height) == _lastTile)
+                if (result.Code == WaitTimeout)
                 {
+                    if ((x, y, width, height) == _lastTile)
+                    {
+                        pixels = _pixels;
+                        return pixels.Length > 0;
+                    }
+                    if (_desktopFrame is null) return false;
+                    // Excluding our HWND stops a drag from generating desktop frames on a
+                    // static background. Recut the new location from the last GPU frame.
+                    ReadTile(_desktopFrame, x, y, width, height);
+                    _lastTile = (x, y, width, height);
                     pixels = _pixels;
-                    return pixels.Length > 0;
+                    return true;
                 }
-                if (result.Code != WaitTimeout) Reset(result.Code == AccessLost ? 250 : 4000);
+                Reset(result.Code == AccessLost ? 250 : 4000);
                 return false;
             }
             try
@@ -68,7 +84,8 @@ internal sealed class DuplicateLensCapture : IDisposable
                 using (var texture = resource!.QueryInterface<ID3D11Texture2D>())
                 {
                     if (texture.Description.Format != Format.B8G8R8A8_UNorm) return false;
-                    ReadTile(texture, x, y, width, height);
+                    CacheDesktopFrame(texture, frameInfo.LastPresentTime != 0);
+                    ReadTile(_desktopFrame ?? texture, x, y, width, height);
                 }
             }
             finally { _output.ReleaseFrame(); }
@@ -81,6 +98,29 @@ internal sealed class DuplicateLensCapture : IDisposable
             Reset(4000);
             return false;
         }
+    }
+
+    private static bool ValidTile(int width, int height) =>
+        width >= 2 && height >= 2 && width <= DesktopLensCapture.MaximumDimension && height <= DesktopLensCapture.MaximumDimension &&
+        (long)width * height <= DesktopLensCapture.MaximumPixels;
+
+    private void CacheDesktopFrame(ID3D11Texture2D source, bool changed)
+    {
+        // Keep a GPU-only copy so moving the card can sample a static desktop.
+        // Cap it at 64 MiB. The working tile still captures on larger outputs.
+        var description = source.Description;
+        if ((long)description.Width * description.Height > 16 * 1024 * 1024) return;
+        if (_desktopFrame is null || _desktopFrame.Description.Width != description.Width || _desktopFrame.Description.Height != description.Height)
+        {
+            _desktopFrame?.Dispose();
+            _desktopFrame = _device!.CreateTexture2D(new Texture2DDescription
+            {
+                Width = description.Width, Height = description.Height, MipLevels = 1, ArraySize = 1,
+                Format = description.Format, SampleDescription = new SampleDescription(1, 0), Usage = ResourceUsage.Default
+            });
+            changed = true;
+        }
+        if (changed) _context!.CopyResource(_desktopFrame, source);
     }
 
     private bool EnsureOutput(int x, int y, int width, int height)
@@ -149,10 +189,12 @@ internal sealed class DuplicateLensCapture : IDisposable
         _lastTile = default;
         _output?.Dispose();
         _tile?.Dispose();
+        _desktopFrame?.Dispose();
         _context?.Dispose();
         _device?.Dispose();
         _output = null;
         _tile = null;
+        _desktopFrame = null;
         _context = null;
         _device = null;
         _retryAt = Environment.TickCount64 + retryDelay;

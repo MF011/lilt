@@ -1,0 +1,49 @@
+<Window x:Class="Lilt.App.UI.RefractionSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:core="clr-namespace:Lilt.Core;assembly=Lilt.Core"
+        Title="Refraction · Lilt" Width="340" SizeToContent="Height"
+        ResizeMode="NoResize" WindowStartupLocation="CenterScreen" Background="#151A20"
+        ShowInTaskbar="False" Foreground="#EEF2F6" FontFamily="Segoe UI" FontSize="13">
+    <Window.Resources>
+        <Style TargetType="Slider">
+            <Setter Property="Margin" Value="0,7,0,18" />
+            <Setter Property="IsMoveToPointEnabled" Value="True" />
+        </Style>
+        <Style x:Key="Value" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#A7B7C5" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="16,8" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+    </Window.Resources>
+    <StackPanel Margin="24">
+        <Grid>
+            <TextBlock Text="Bend" />
+            <TextBlock Style="{StaticResource Value}" Text="{Binding Value, ElementName=BendSlider, StringFormat={}{0:0.#} px}" />
+        </Grid>
+        <Slider x:Name="BendSlider" Maximum="{x:Static core:RefractionSettings.MaximumBend}" TickFrequency="0.5"
+                IsSnapToTickEnabled="True" ValueChanged="OnOptionChanged" AutomationProperties.Name="Bend" />
+        <Grid>
+            <TextBlock Text="Softness" />
+            <TextBlock Style="{StaticResource Value}" Text="{Binding Value, ElementName=SoftnessSlider, StringFormat={}{0:0.##} px}" />
+        </Grid>
+        <Slider x:Name="SoftnessSlider" Maximum="{x:Static core:RefractionSettings.MaximumSoftness}" TickFrequency="0.25"
+                IsSnapToTickEnabled="True" ValueChanged="OnOptionChanged" AutomationProperties.Name="Softness" />
+        <Grid>
+            <TextBlock Text="Color split" />
+            <TextBlock Style="{StaticResource Value}" Text="{Binding Value, ElementName=ColorSlider, StringFormat={}{0:0.##} px}" />
+        </Grid>
+        <Slider x:Name="ColorSlider" Maximum="{x:Static core:RefractionSettings.MaximumColorSplit}" TickFrequency="0.05"
+                IsSnapToTickEnabled="True" ValueChanged="OnOptionChanged" AutomationProperties.Name="Color split" />
+        <CheckBox x:Name="ReducedResolution" Content="Use reduced resolution" Foreground="#D6E1EB"
+                  Checked="OnOptionChanged" Unchecked="OnOptionChanged" />
+        <DockPanel Margin="0,23,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Left" Content="Reset" Click="OnReset" Background="#27323B" Foreground="#EEF2F6" />
+            <Button DockPanel.Dock="Right" Content="Done" IsDefault="True" Click="OnDone" Background="#C9F8E4" Foreground="#14231C" />
+        </DockPanel>
+    </StackPanel>
+</Window>

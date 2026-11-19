@@ -26,6 +26,7 @@ public partial class App : Application
     private SpotifyMediaService _local = null!;
     private SpotifyClient _spotify = null!;
     private SettingsWindow? _accountWindow;
+    private RefractionSettingsWindow? _refractionSettingsWindow;
     private DispatcherTimer? _positionTimer;
     private DispatcherTimer? _pollTimer;
     private DispatcherTimer? _saveTimer;
@@ -110,6 +111,7 @@ public partial class App : Application
             _widget.Show();
             _windowBehavior.RestoreToVisibleScreen();
             _lens = new GlassLens(_widget, _viewModel, _windowBehavior);
+            _lens.SetStyle(_settings.RefractionStyle);
             _lens.AvailabilityChanged += UpdateTray;
             if (!_smokeTest) _lens.SetEnabled(_settings.Glass && _settings.Refraction);
             UpdateTray();
@@ -178,6 +180,7 @@ public partial class App : Application
             SaveSettings();
             UpdateTray();
         };
+        _tray.RefractionSettingsRequested += OpenRefractionSettings;
         _tray.OpacityChanged += value =>
         {
             _settings = (_settings with { GlassOpacity = value }).Validated();
@@ -196,6 +199,25 @@ public partial class App : Application
         _tray.OpenSpotifyRequested += OpenSpotify;
         _tray.ResetPositionRequested += ResetPosition;
         _tray.ExitRequested += () => _ = QuitAsync();
+    }
+
+    private void OpenRefractionSettings()
+    {
+        if (_refractionSettingsWindow is { } existing)
+        {
+            existing.Activate();
+            return;
+        }
+        var window = new RefractionSettingsWindow(_settings.RefractionStyle);
+        _refractionSettingsWindow = window;
+        window.OptionsChanged += style =>
+        {
+            _settings = _settings with { RefractionStyle = style };
+            _lens?.SetStyle(style);
+            QueueSave();
+        };
+        window.Closed += (_, _) => _refractionSettingsWindow = null;
+        window.Show();
     }
 
     private void OnLocalSnapshotChanged(object? sender, PlaybackSnapshot snapshot)
@@ -549,6 +571,7 @@ public partial class App : Application
         _lifetime.Cancel();
         _signInCancellation?.Cancel();
         _accountWindow?.Close();
+        _refractionSettingsWindow?.Close();
         _tray?.Dispose();
         _lens?.Dispose();
         _windowBehavior?.Dispose();

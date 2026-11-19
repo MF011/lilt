@@ -284,7 +284,7 @@ public static class NativeSmokeChecks
         finally { SetCursorPos(originalPointer.X, originalPointer.Y); }
     }
 
-    private static async Task DragPointerAsync(int x, int y, int dx, int dy)
+    private static async Task DragPointerAsync(int x, int y, int dx, int dy, Func<Task>? whileHeld = null)
     {
         Require(SetCursorPos(x, y), "Could not place the desktop pointer.");
         await Task.Delay(120);
@@ -294,6 +294,7 @@ public static class NativeSmokeChecks
             await Task.Delay(100);
             Require(SetCursorPos(x + dx, y + dy), "Could not move the desktop pointer.");
             await Task.Delay(180);
+            if (whileHeld is not null) await whileHeld();
         }
         finally { SendMouseButton(0x0004); }
         await Task.Delay(120);
@@ -389,6 +390,9 @@ public static class NativeSmokeChecks
 
         Require(lens.IsAvailable == true && vm.RefractedBackground is not null,
             "Refraction could not obtain a desktop sample without the widget's own layer.");
+        Require(vm.RefractedBackground!.PixelWidth == rect.Right - rect.Left &&
+                vm.RefractedBackground.PixelHeight == rect.Bottom - rect.Top,
+            "The normal-size card lost resolution in the live pipeline.");
         report.Add($"Desktop refraction source: {lens.CaptureSource}.");
         using var refracted = ReadDesktop(rect);
         refracted.Save(Path.Combine(output, "refraction-on.png"), System.Drawing.Imaging.ImageFormat.Png);
@@ -404,9 +408,55 @@ public static class NativeSmokeChecks
         Require(changed, "Refraction did not update when the window behind the card changed.");
         if (lens.CaptureSource == "Display duplication")
             await CheckOverlappingRefractionAsync(window, rect, vm, lens, output, report);
+        await CheckMovingRefractionAsync(window, vm, behavior, rect, panel, output, report);
         lens.SetEnabled(false);
         Require(vm.RefractedBackground is null, "Disabling refraction did not clear the lens frame.");
         report.Add("Desktop refraction: the capture excluded the card, the lens rendered, and changing the backdrop updated the frame.");
+    }
+
+    private static async Task CheckMovingRefractionAsync(MainWindow window, WidgetViewModel vm, WindowBehavior behavior,
+        NativeMethods.Rect rect, Border panel, string output, List<string> report)
+    {
+        var card = new WindowInteropHelper(window).Handle;
+        var backingWindow = Window.GetWindow(panel)!;
+        var backing = new WindowInteropHelper(backingWindow).Handle;
+        var width = rect.Right - rect.Left;
+        var height = rect.Bottom - rect.Top;
+        // Keep a static pattern under both positions, including the capture margin.
+        Require(NativeMethods.SetWindowPos(backing, new IntPtr(-1), rect.Left - 48, rect.Top - 48,
+            width + 168, height + 168, NativeMethods.SwpNoActivate), "Could not extend the backing window for dragging.");
+        Require(NativeMethods.SetWindowPos(card, new IntPtr(-1), 0, 0, 0, 0,
+            NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate), "Could not raise the card for dragging.");
+        panel.Background = CreateGridBrush(Color.FromRgb(146, 203, 85));
+        await Task.Delay(450);
+        Require(vm.RefractedBackground is not null, "The lens had no starting frame for dragging.");
+        var before = EncodePng(vm.RefractedBackground!);
+        var gripY = rect.Top + (int)Math.Ceiling(13 * VisualTreeHelper.GetDpi(window).DpiScaleY);
+        Require(GetCursorPos(out var originalPointer), "Could not read the desktop pointer.");
+        try
+        {
+            await DragPointerAsync(rect.Left + width / 2, gripY, 37, 23, async () =>
+            {
+                Require(behavior.IsGestureActive && !behavior.IsResizing, "A card move was not active.");
+                for (var attempt = 0; attempt < 10; attempt++)
+                {
+                    Require(vm.RefractedBackground is not null, "The lens disappeared while the pointer was held down.");
+                    if (!EncodePng(vm.RefractedBackground!).AsSpan().SequenceEqual(before))
+                    {
+                        Require(NativeMethods.GetWindowRect(card, out var moved) && moved.Left >= rect.Left + 35,
+                            "The test did not drag the card to a new position.");
+                        await Task.Delay(90);
+                        using var desktop = ReadDesktop(moved);
+                        desktop.Save(Path.Combine(output, "refraction-drag.png"), System.Drawing.Imaging.ImageFormat.Png);
+                        report.Add("Desktop refraction: full-resolution lens stayed visible and sampled the new position with the mouse held down.");
+                        return;
+                    }
+                    await Task.Delay(65);
+                }
+                throw new InvalidOperationException("The lens froze on the old background during a drag.");
+            });
+        }
+        finally { SetCursorPos(originalPointer.X, originalPointer.Y); }
     }
 
     private static async Task CheckOverlappingRefractionAsync(MainWindow window, NativeMethods.Rect rect, WidgetViewModel vm,

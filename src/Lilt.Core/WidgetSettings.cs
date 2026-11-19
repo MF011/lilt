@@ -12,6 +12,7 @@ public sealed record WidgetSettings
     public bool Topmost { get; init; } = true;
     public bool Glass { get; init; } = true;
     public bool Refraction { get; init; }
+    public RefractionSettings RefractionStyle { get; init; } = new();
     public bool IgnoreClicks { get; init; }
 
     public WidgetSettings Validated() => this with
@@ -19,6 +20,7 @@ public sealed record WidgetSettings
         Width = FiniteClamp(Width, WidgetLayout.MinimumWidth, 1600, 320),
         Height = FiniteClamp(Height, WidgetLayout.MinimumHeight, 1000, 96),
         GlassOpacity = FiniteClamp(GlassOpacity, .18, .95, DefaultGlassOpacity),
+        RefractionStyle = (RefractionStyle ?? new()).Validated(),
         Left = Left is { } left && double.IsFinite(left) ? Math.Clamp(left, -100000, 100000) : null,
         Top = Top is { } top && double.IsFinite(top) ? Math.Clamp(top, -100000, 100000) : null
     };

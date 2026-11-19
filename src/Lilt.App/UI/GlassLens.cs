@@ -21,6 +21,7 @@ internal sealed class GlassLens : IDisposable
     private IntPtr _excludedWindow;
     private Task<WindowFrame>? _pending;
     private LensRefraction? _renderer;
+    private RefractionSettings _style = new();
     private WriteableBitmap? _bitmap;
     private byte[]? _output;
     private CaptureSize _size;
@@ -43,7 +44,7 @@ internal sealed class GlassLens : IDisposable
         _behavior = behavior;
         _timer = new DispatcherTimer(DispatcherPriority.Background, window.Dispatcher)
         {
-            Interval = TimeSpan.FromMilliseconds(75)
+            Interval = TimeSpan.FromMilliseconds(50)
         };
         _timer.Tick += Render;
         window.IsVisibleChanged += OnVisibilityChanged;
@@ -54,6 +55,14 @@ internal sealed class GlassLens : IDisposable
         if (_disposed || enabled == _enabled) return;
         _enabled = enabled;
         UpdateTimer();
+    }
+
+    public void SetStyle(RefractionSettings style)
+    {
+        style = style.Validated();
+        if (style == _style) return;
+        _style = style;
+        _renderer = null;
     }
 
     private void OnVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e) => UpdateTimer();
@@ -78,18 +87,16 @@ internal sealed class GlassLens : IDisposable
 
     private void Render(object? sender, EventArgs args)
     {
-        if (_behavior.IsGestureActive)
-        {
-            _viewModel.RefractedBackground = null;
-            _nextProbe = 0;
-            _requestGeneration++;
-            return;
-        }
+        // Resizing stretches the previous frame until the new size settles. A move
+        // can continue capturing at the same size without rebuilding the lens map.
+        if (_behavior.IsResizing) return;
+        var interval = TimeSpan.FromMilliseconds(_behavior.IsGestureActive ? 33 : 50);
+        if (_timer.Interval != interval) _timer.Interval = interval;
 
         var handle = new WindowInteropHelper(_window).Handle;
         if (!NativeMethods.GetWindowRect(handle, out var rect) || !TryGetMarker(out var marker))
         {
-            _viewModel.RefractedBackground = null;
+            if (!_behavior.IsGestureActive) _viewModel.RefractedBackground = null;
             return;
         }
 
@@ -104,7 +111,7 @@ internal sealed class GlassLens : IDisposable
         var height = rect.Bottom - rect.Top;
         var dpi = VisualTreeHelper.GetDpi(_window).DpiScaleX;
         if (width < 2 || height < 2) return;
-        var padding = (int)Math.Ceiling(24 * dpi);
+        var padding = (int)Math.Ceiling(40 * dpi);
         if (_desktopExcludesWidget && TryCaptureDesktop(rect, padding, marker, out var pixels, out var usedPadding))
         {
             Paint(pixels, new CaptureSize(width, height, usedPadding, dpi), "Desktop tile");
@@ -143,7 +150,7 @@ internal sealed class GlassLens : IDisposable
         {
             if (!pending.IsCompleted)
             {
-                if (now - _windowRequestedAt > 600)
+                if (!_behavior.IsGestureActive && now - _windowRequestedAt > 600)
                 {
                     _viewModel.RefractedBackground = null;
                     SetAvailability(false);
@@ -152,11 +159,16 @@ internal sealed class GlassLens : IDisposable
             }
             _pending = null;
             var completed = pending.GetAwaiter().GetResult();
-            if (completed.Request == request)
+            if (completed.Request.Generation == request.Generation && completed.Request.Size == request.Size)
             {
                 if (completed.Pixels.Length > 0)
-                    Paint(completed.Pixels, request.Size with { Padding = completed.Padding }, completed.Source!);
-                else
+                {
+                    var dx = request.Rect.Left - completed.Request.Rect.Left;
+                    var dy = request.Rect.Top - completed.Request.Rect.Top;
+                    if (Math.Abs(dx) <= completed.Padding && Math.Abs(dy) <= completed.Padding)
+                        Paint(completed.Pixels, request.Size with { Padding = completed.Padding }, completed.Source!, dx, dy);
+                }
+                else if (!_behavior.IsGestureActive && completed.Request.Rect.Equals(request.Rect))
                 {
                     _viewModel.RefractedBackground = null;
                     SetAvailability(false);
@@ -178,10 +190,15 @@ internal sealed class GlassLens : IDisposable
     {
         var size = request.Size;
         var rect = request.Rect;
-        if (duplicate is not null && duplicate.TryCapture(rect.Left, rect.Top, size.Width, size.Height, out var tile) &&
-            !MatchesMarker(tile, size.Width * 4, size.Height, request.Marker.X - rect.Left, request.Marker.Y - rect.Top, request.Marker.Color) &&
-            HasVisiblePixels(tile, size.Width, size.Height))
-            return new WindowFrame(request, 0, tile, "Display duplication");
+        var duplicatePadding = size.Padding;
+        if (duplicate is not null && duplicate.TryCapture(rect.Left, rect.Top, size.Width, size.Height, ref duplicatePadding, out var tile))
+        {
+            var width = size.Width + duplicatePadding * 2;
+            var height = size.Height + duplicatePadding * 2;
+            if (!MatchesMarker(tile, width * 4, height, request.Marker.X - rect.Left + duplicatePadding,
+                request.Marker.Y - rect.Top + duplicatePadding, request.Marker.Color) && HasVisiblePixels(tile, width, height))
+                return new WindowFrame(request, duplicatePadding, tile, "Display duplication");
+        }
 
         var padding = size.Padding;
         if (capture.TryCapture(request.Handle, rect.Left - padding, rect.Top - padding,
@@ -206,18 +223,21 @@ internal sealed class GlassLens : IDisposable
         return false;
     }
 
-    private void Paint(byte[] pixels, CaptureSize size, string source)
+    private void Paint(byte[] pixels, CaptureSize size, string source, int offsetX = 0, int offsetY = 0)
     {
         if (_renderer is null || size != _size)
         {
-            _renderer = new LensRefraction(size.Width, size.Height, size.Padding, size.Dpi);
+            _renderer = new LensRefraction(size.Width, size.Height, size.Padding, size.Dpi, settings: _style);
             _size = size;
-            _bitmap = new WriteableBitmap(_renderer.OutputWidth, _renderer.OutputHeight, 96, 96, PixelFormats.Bgra32, null);
-            _output = new byte[_renderer.OutputWidth * _renderer.OutputHeight * 4];
+            if (_bitmap is null || _bitmap.PixelWidth != _renderer.OutputWidth || _bitmap.PixelHeight != _renderer.OutputHeight)
+            {
+                _bitmap = new WriteableBitmap(_renderer.OutputWidth, _renderer.OutputHeight, 96, 96, PixelFormats.Bgra32, null);
+                _output = new byte[_renderer.OutputWidth * _renderer.OutputHeight * 4];
+            }
         }
 
         var outputStride = _renderer.OutputWidth * 4;
-        _renderer.Render(pixels, _renderer.SourceWidth * 4, _output!, outputStride, soften: true);
+        _renderer.Render(pixels, _renderer.SourceWidth * 4, _output!, outputStride, offsetX: offsetX, offsetY: offsetY);
         _bitmap!.WritePixels(new Int32Rect(0, 0, _bitmap.PixelWidth, _bitmap.PixelHeight), _output!, outputStride, 0);
         _viewModel.RefractedBackground = _bitmap;
         CaptureSource = source;
